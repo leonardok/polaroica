@@ -9,7 +9,7 @@ import { Thumb } from './core/cache';
 import { ThumbJob, ThumbService } from './thumbs';
 import { EditStore } from './edits';
 import { PhotoExporter } from './export';
-import { fromWire, localRoots, post, webviewHtml } from './webview';
+import { DETAILS_WIDTH, fromWire, localRoots, post, webviewHtml } from './webview';
 import * as fs from 'fs';
 import { FaceModels } from './faceModel';
 import { FaceMetric } from './core/rank';
@@ -32,6 +32,7 @@ type FromGrid =
   | { type: 'facesResult'; id: number; faces?: FaceMetric[]; error?: string }
   | { type: 'onscreen'; names: string[] }
   | { type: 'decoded'; id: number; data?: unknown; w?: number; h?: number }
+  | { type: 'detailsWidth'; width: number }
   | { type: 'refresh' };
 
 export interface GridHost {
@@ -351,6 +352,7 @@ class GridPanel {
       crumbs: libraries.crumbs(this.folder),
       sort: this.sort,
       tileSize,
+      detailsWidth: this.owner.ctx.context.globalState.get<number>(DETAILS_WIDTH, 0),
       selected: this.selected,
       photos: this.photos.map((p) => ({ ...toView(this.webview, p), src: undefined, cull: cull.get(p.name) ?? null, ratio: ratio(p) })),
     });
@@ -456,6 +458,9 @@ class GridPanel {
         break;
       case 'tileSize':
         await context.globalState.update('vsphoto.tileSize', m.size);
+        break;
+      case 'detailsWidth':
+        await context.globalState.update(DETAILS_WIDTH, Math.max(0, Math.round(m.width)) || undefined);
         break;
     }
   }

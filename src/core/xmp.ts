@@ -21,7 +21,11 @@ export interface Edits {
   shadows: number;
   whites: number;
   blacks: number;
-  temp: number; // -100..100 (relative, as for JPEGs)
+  temp: number; // -100..100, relative (older edits; the photo tab now sets `kelvin`)
+  /** White balance in Kelvin (0 = as shot), relative to `kelvinRef`. */
+  kelvin: number;
+  /** The photo's own temperature the edit was made against: as shot (RAW) or estimated (JPEG). */
+  kelvinRef: number;
   tint: number;
   vibrance: number;
   saturation: number;
@@ -45,6 +49,8 @@ export function defaultEdits(): Edits {
     whites: 0,
     blacks: 0,
     temp: 0,
+    kelvin: 0,
+    kelvinRef: 0,
     tint: 0,
     vibrance: 0,
     saturation: 0,
@@ -57,8 +63,18 @@ function isIdentity(c: CurvePoint[]): boolean {
 }
 
 export function isDefault(e: Edits): boolean {
-  return SLIDERS.every((k) => e[k] === 0) && (['rgb', 'r', 'g', 'b'] as const).every((k) => isIdentity(e.curves[k]));
+  return SLIDERS.every((k) => e[k] === 0) && !hasKelvin(e) && (['rgb', 'r', 'g', 'b'] as const).every((k) => isIdentity(e.curves[k]));
 }
+
+/** A Kelvin white balance that differs from the photo's own. */
+export function hasKelvin(e: Pick<Edits, 'kelvin' | 'kelvinRef'>): boolean {
+  return e.kelvin > 0 && e.kelvinRef > 0 && e.kelvin !== e.kelvinRef;
+}
+
+const kelvinOf = (v: unknown) => {
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 1000 ? Math.round(Math.min(50000, n) / 10) * 10 : 0;
+};
 
 /** Clamps and fills in whatever came from a file or a webview message. */
 export function normalizeEdits(raw: unknown): Edits {
@@ -73,6 +89,12 @@ export function normalizeEdits(raw: unknown): Edits {
       const lim = k === 'exposure' ? 5 : 100;
       e[k] = Math.max(-lim, Math.min(lim, k === 'exposure' ? Math.round(v * 100) / 100 : Math.round(v)));
     }
+  }
+  e.kelvin = kelvinOf(r.kelvin);
+  e.kelvinRef = kelvinOf(r.kelvinRef);
+  if (!e.kelvin || !e.kelvinRef) {
+    e.kelvin = 0;
+    e.kelvinRef = 0;
   }
   const curves = r.curves as Record<string, unknown> | undefined;
   for (const k of ['rgb', 'r', 'g', 'b'] as const) {
@@ -154,7 +176,11 @@ const unescapeAttr = (t: string) => t.replace(/&quot;/g, '"').replace(/&lt;/g, '
 export function toXmp(input: Edits | Sidecar): string {
   const sc: Sidecar = 'edits' in input ? input : { ...emptySidecar(), edits: input };
   const e = sc.edits;
-  const attrs = SLIDERS.map((k) => `   crs:${SLIDER_TAGS[k]}="${signed(e[k], k === 'exposure' ? 2 : 0)}"`).join('\n');
+  const attrs = [
+    ...SLIDERS.map((k) => `   crs:${SLIDER_TAGS[k]}="${signed(e[k], k === 'exposure' ? 2 : 0)}"`),
+    // Kelvin, as Camera Raw writes it, plus the temperature it was set against.
+    ...(hasKelvin(e) ? [`   crs:Temperature="${e.kelvin}"`, `   vsphoto:TemperatureRef="${e.kelvinRef}"`] : []),
+  ].join('\n');
   const culling = [
     `   xmp:Rating="${sc.rating}"`,
     sc.flag ? `   vsphoto:Flag="${sc.flag}"` : '',
@@ -211,6 +237,12 @@ export function readSidecar(text: string): Sidecar {
     }
   }
   raw.curves = curves;
+  const kelvin = /crs:Temperature\s*=\s*"(\d+)"/.exec(text);
+  const ref = /vsphoto:TemperatureRef\s*=\s*"(\d+)"/.exec(text);
+  if (kelvin && ref) {
+    raw.kelvin = Number(kelvin[1]);
+    raw.kelvinRef = Number(ref[1]);
+  }
   const sc: Sidecar = { edits: normalizeEdits(raw), rating: 0 };
   const rating = /xmp:Rating\s*=\s*"(-?\d+)"/.exec(text);
   if (rating) {

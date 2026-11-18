@@ -60,6 +60,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const tree = new LibraryTree(libraries, store, async (files, target) => {
     await mover.move(files, target);
   });
+  tree.media = vscode.Uri.joinPath(context.extensionUri, 'media');
   tree.picksIn = async (folder) => {
     let n = 0;
     for (const c of (await edits.cullingIn(folder)).values()) {

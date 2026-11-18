@@ -110,3 +110,6 @@ export function nextFreeName(name: string, taken: (candidate: string) => boolean
   }
   throw new Error(`No free name for ${name}`);
 }
+
+/** The folder Export to JPEG creates inside an album by default. */
+export const EXPORT_FOLDER = 'Export';

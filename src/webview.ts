@@ -26,6 +26,9 @@ function asset(extensionUri: vscode.Uri, file: string): string {
  * HTML for our webviews: strict CSP; CSS and scripts inlined. Inlining matters: webview
  * resources share one loader, and photos streaming from a slow share must not hold up the UI.
  */
+/** globalState key: the side panel's width in the grid and photo tabs (px; unset = default). */
+export const DETAILS_WIDTH = 'vsphoto.detailsWidth';
+
 export function webviewHtml(
   webview: vscode.Webview,
   extensionUri: vscode.Uri,

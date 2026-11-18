@@ -7,11 +7,12 @@ import { Mover } from './move';
 import { Photo, PhotoStore } from './photoStore';
 import { isDisplayable, isRaw } from './core/images';
 import { rawPreview, ThumbService } from './thumbs';
-import { localRoots, post, webviewHtml } from './webview';
+import { DETAILS_WIDTH, localRoots, post, webviewHtml } from './webview';
 import * as fs from 'fs';
 import { EditStore } from './edits';
 import { PhotoExporter } from './export';
 import { normalizeEdits } from './core/xmp';
+import { rawAsShotKelvin } from './core/exporter';
 import { mimeOf } from './thumbs';
 
 type FromViewer =
@@ -25,7 +26,8 @@ type FromViewer =
   | { type: 'saveEdits'; name: string; edits: unknown }
   | { type: 'copyEdits'; edits: unknown }
   | { type: 'pasteEdits' }
-  | { type: 'rate'; name: string; rating?: number; flag?: 'pick' | 'reject' | null };
+  | { type: 'rate'; name: string; rating?: number; flag?: 'pick' | 'reject' | null }
+  | { type: 'detailsWidth'; width: number };
 
 const STRIP_RADIUS = 6;
 
@@ -34,6 +36,22 @@ export class PhotoViewers implements vscode.Disposable {
   private readonly viewers = new Set<PhotoViewer>();
   /** Export (right-click → Export…), set by the extension. */
   exporter?: PhotoExporter;
+  /** As-shot white balance of RAW files (Kelvin), by path, size and date. */
+  private readonly asShotCache = new Map<string, Promise<number | undefined>>();
+
+  /** A RAW file's as-shot white balance in Kelvin (from its header); undefined for others. */
+  asShot(photo: Photo): Promise<number | undefined> {
+    if (!isRaw(photo.name)) {
+      return Promise.resolve(undefined);
+    }
+    const key = `${photo.uri.fsPath}|${photo.size}|${photo.mtime}`;
+    let p = this.asShotCache.get(key);
+    if (!p) {
+      p = rawAsShotKelvin(photo.uri.fsPath).catch(() => undefined);
+      this.asShotCache.set(key, p);
+    }
+    return p;
+  }
 
   constructor(
     readonly context: vscode.ExtensionContext,
@@ -199,6 +217,7 @@ class PhotoViewer {
     void post(webview, {
       type: 'show',
       crumbs: this.owner.libraries.crumbs(this.folder),
+      detailsWidth: this.owner.context.globalState.get<number>(DETAILS_WIDTH, 0),
       index: this.index,
       total: this.photos.length,
       photo: view,
@@ -233,6 +252,12 @@ class PhotoViewer {
         rawPreview(photo.uri.fsPath).then((data) => {
           if (this.current === photo) {
             void post(webview, { type: 'preview', name: photo.name, data });
+          }
+        }),
+        // The camera's as-shot white balance: where the Temperature slider starts.
+        this.owner.asShot(photo).then((kelvin) => {
+          if (kelvin && this.current === photo) {
+            void post(webview, { type: 'whiteBalance', name: photo.name, kelvin, source: 'camera' });
           }
         }),
       );
@@ -323,6 +348,9 @@ class PhotoViewer {
         if (this.current) {
           await vscode.commands.executeCommand('revealFileInOS', this.current.uri);
         }
+        break;
+      case 'detailsWidth':
+        await this.owner.context.globalState.update(DETAILS_WIDTH, Math.max(0, Math.round(m.width)) || undefined);
         break;
     }
   }

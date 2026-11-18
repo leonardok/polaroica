@@ -1,7 +1,7 @@
 // Library view: photo grid for one folder. Shows thumbnails only (never the originals): the
 // extension sends cached ones, placeholders, and asks this page to decode + shrink the rest.
 (function () {
-  const { vscode, h, icon, crumbs, detailsList, blobUrl, makeThumbnail, section, photoContext, rankExplanation, keyBelongsToControl } = window.vsphoto;
+  const { vscode, h, icon, crumbs, detailsList, panelResizer, blobUrl, makeThumbnail, section, photoContext, rankExplanation, keyBelongsToControl } = window.vsphoto;
   const app = document.getElementById('app');
 
   let photos = [];
@@ -12,7 +12,10 @@
   let tileSize = (vscode.getState() || {}).tileSize || 160;
   /** Culling view: which photos show. Remembered per tab. */
   let view = Object.assign({ filter: 'all', hideRejects: false, minStars: 0, stack: true }, (vscode.getState() || {}).view || {});
-  let filterBarEl, lastDetails;
+  let lastDetails;
+  let actionsEl, menuEl, menuBtn;
+  let menuOpen = false;
+  let sortSel, sizeInput;
   let tiles = [];
   let tileByName = new Map();
   let gridEl, detailsEl, countEl;
@@ -84,7 +87,9 @@
 
   function summary() {
     const n = photos.length;
-    return `${n.toLocaleString()} photo${n === 1 ? '' : 's'}${selected.size ? ` · ${selected.size} selected` : ''}`;
+    const shown = tiles.filter((t) => !t.hidden).length;
+    const of = shown < n ? `${shown.toLocaleString()} of ${n.toLocaleString()}` : n.toLocaleString();
+    return `${of} photo${n === 1 ? '' : 's'}${selected.size ? ` · ${selected.size} selected` : ''}`;
   }
 
   function paintSelection() {
@@ -233,52 +238,118 @@
     return n;
   }
 
+  /** Are any filters narrowing the grid (the filter button shows a dot)? */
+  function filtering() {
+    return view.filter !== 'all' || view.hideRejects || view.minStars > 0;
+  }
+
+  /** The toolbar's action icons and the View menu (filters, stacking, sort, size). */
   function paintFilterBar() {
-    if (!filterBarEl) return;
+    if (!actionsEl || !menuEl) return;
     const n = counts();
-    const seg = h(
-      'div',
-      { class: 'segmented', role: 'radiogroup', 'aria-label': 'Show' },
-      [['all', 'All'], ['picks', 'Picks'], ['unflagged', 'Unflagged'], ['rejects', 'Rejects']].map(([id, label]) =>
-        h(
-          'button',
-          {
-            class: 'seg' + (view.filter === id ? ' on' : ''),
-            role: 'radio',
-            'aria-checked': String(view.filter === id),
-            onclick: () => {
-              view.filter = id;
-              saveView();
-              applyFilter();
-            },
-          },
-          label,
-          h('span', { class: 'seg-count' }, String(n[id])),
-        ),
-      ),
+    const focusedKey = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.k : undefined;
+
+    menuBtn = h(
+      'button',
+      {
+        class: 'icon-btn' + (filtering() ? ' active' : ''),
+        'aria-label': filtering() ? 'Filter and view options (filtered)' : 'Filter and view options',
+        title: 'Filter, sort and size',
+        'aria-haspopup': 'true',
+        'aria-expanded': String(menuOpen),
+        dataset: { k: 'menu' },
+        onclick: (e) => {
+          e.stopPropagation();
+          setMenu(!menuOpen);
+        },
+      },
+      icon('filter'),
+      filtering() ? h('span', { class: 'dot', 'aria-hidden': 'true' }) : null,
     );
-    const hide = h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: view.hideRejects, onchange: (e) => { view.hideRejects = e.target.checked; saveView(); applyFilter(); } }), 'Hide rejects');
+    const iconBtn = (name, label, onclick, badge) =>
+      h('button', { class: 'icon-btn', 'aria-label': label, title: label, dataset: { k: name }, onclick }, icon(name), badge ? h('span', { class: 'badge', 'aria-hidden': 'true' }, String(badge)) : null);
+    if (!photos.length) {
+      actionsEl.replaceChildren(iconBtn('refresh', 'Refresh', () => post({ type: 'refresh' })));
+      countEl.textContent = summary();
+      return;
+    }
+    actionsEl.replaceChildren(
+      ...[
+      h('span', { class: 'menu-anchor' }, menuBtn, menuOpen ? menuEl : null),
+      h('span', { class: 'sep', 'aria-hidden': 'true' }),
+      iconBtn('spark', 'Auto-Rank this album (focus, exposure, similar shots)…', () => post({ type: 'autoRank' })),
+      iconBtn('export', 'Export to JPEG (the selection, picks, by stars…) with your adjustments…', () => post({ type: 'export' })),
+      n.rejects
+        ? iconBtn('trash', `Delete ${n.rejects} rejected photo${n.rejects === 1 ? '' : 's'} from disk… (asks first)`, () => post({ type: 'deleteRejected' }), n.rejects)
+        : null,
+      iconBtn('refresh', 'Refresh', () => post({ type: 'refresh' })),
+      ].filter(Boolean),
+    );
+
+    const radio = (id, label) =>
+      h(
+        'button',
+        {
+          class: 'menu-row' + (view.filter === id ? ' on' : ''),
+          role: 'menuitemradio',
+          'aria-checked': String(view.filter === id),
+          dataset: { k: 'f-' + id },
+          onclick: () => {
+            view.filter = id;
+            saveView();
+            applyFilter();
+          },
+        },
+        h('span', { class: 'mark', 'aria-hidden': 'true' }, view.filter === id ? icon('check', 12) : null),
+        label,
+        h('span', { class: 'menu-count' }, String(n[id])),
+      );
+    const check = (k, label, on, set) =>
+      h('label', { class: 'menu-row' }, h('input', { type: 'checkbox', checked: on, dataset: { k }, onchange: (e) => set(e.target.checked) }), label);
     const starsSel = h(
       'select',
-      { 'aria-label': 'Minimum stars', onchange: (e) => { view.minStars = Number(e.target.value); saveView(); applyFilter(); } },
+      { 'aria-label': 'Minimum stars', dataset: { k: 'stars' }, onchange: (e) => { view.minStars = Number(e.target.value); saveView(); applyFilter(); } },
       [0, 1, 2, 3, 4, 5].map((k) => h('option', { value: String(k), selected: view.minStars === k }, k === 0 ? 'Any' : k === 5 ? '★ 5' : `★ ${k}+`)),
     );
-    const stack = n.groups
-      ? h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: view.stack, onchange: (e) => { view.stack = e.target.checked; saveView(); tiles.forEach((t, i) => paintTile(t, photos[i])); applyFilter(); } }), 'Stack similar shots')
-      : null;
-    filterBarEl.replaceChildren(
-      seg,
-      hide,
-      h('label', {}, 'Stars', starsSel),
-      stack,
-      h('span', { class: 'grow' }),
-      h('span', { class: 'key-hint' }, 'P pick · X reject · U clear · 0–5 stars'),
-      h('button', { class: 'btn', title: 'Export photos of this album to JPEG (the selection, picks, by stars…), with your adjustments', onclick: () => post({ type: 'export' }) }, icon('export', 12), ' Export…'),
-      n.rejects
-        ? h('button', { class: 'btn', title: 'Delete the rejected photos of this album from disk (asks first; to the Trash when the drive has one)', onclick: () => post({ type: 'deleteRejected' }) }, icon('trash', 12), ` Delete ${n.rejects} reject${n.rejects === 1 ? '' : 's'}…`)
+    menuEl.replaceChildren(
+      ...[
+      h('div', { class: 'menu-title' }, 'Show'),
+      radio('all', 'All'),
+      radio('picks', 'Picks'),
+      radio('unflagged', 'Unflagged'),
+      radio('rejects', 'Rejects'),
+      h('label', { class: 'menu-row field' }, 'Stars', starsSel),
+      check('hide', 'Hide rejects', view.hideRejects, (v) => { view.hideRejects = v; saveView(); applyFilter(); }),
+      n.groups
+        ? check('stack', 'Stack similar shots', view.stack, (v) => { view.stack = v; saveView(); tiles.forEach((t, i) => paintTile(t, photos[i])); applyFilter(); })
         : null,
-      h('button', { class: 'btn', title: 'Rate this album automatically (focus, exposure, similar shots)', onclick: () => post({ type: 'autoRank' }) }, icon('spark', 12), ' Auto-Rank…'),
+      filtering()
+        ? h('button', { class: 'menu-row link', dataset: { k: 'reset' }, onclick: () => { view.filter = 'all'; view.hideRejects = false; view.minStars = 0; saveView(); applyFilter(); } }, 'Clear filters')
+        : null,
+      h('div', { class: 'menu-sep' }),
+      h('div', { class: 'menu-title' }, 'View'),
+      h('label', { class: 'menu-row field' }, 'Sort', sortSel),
+      h('label', { class: 'menu-row field' }, 'Size', sizeInput),
+      h('div', { class: 'menu-sep' }),
+      h('div', { class: 'menu-hint' }, 'P pick · X reject · U clear · 0–5 stars'),
+      ].filter(Boolean),
     );
+    if (focusedKey) {
+      const again = (menuOpen ? menuEl : actionsEl).querySelector(`[data-k="${focusedKey}"]`) || actionsEl.querySelector(`[data-k="${focusedKey}"]`);
+      if (again && again !== document.activeElement) again.focus();
+    }
+    countEl.textContent = summary();
+  }
+
+  function setMenu(open, refocus) {
+    menuOpen = open;
+    paintFilterBar();
+    if (open) {
+      const first = menuEl.querySelector('.menu-row.on') || menuEl.querySelector('button, input, select');
+      first?.focus();
+    } else if (refocus) {
+      menuBtn?.focus();
+    }
   }
 
   /** P / X / U / 0–5 on the selection (or the focused photo). */
@@ -332,17 +403,18 @@
     }
     selected = new Set((state.selected || []).filter((n) => names.has(n)));
 
-    const sortSel = h(
+    sortSel = h(
       'select',
-      { 'aria-label': 'Sort by', onchange: (e) => post({ type: 'sort', key: e.target.value }) },
+      { 'aria-label': 'Sort by', dataset: { k: 'sort' }, onchange: (e) => post({ type: 'sort', key: e.target.value }) },
       [
         ['name', 'File name'],
         ['modified', 'Date modified'],
         ['size', 'File size'],
       ].map(([v, l]) => h('option', { value: v, selected: v === sort }, l)),
     );
-    const size = h('input', {
+    sizeInput = h('input', {
       type: 'range',
+      dataset: { k: 'size' },
       min: '90',
       max: '280',
       step: '10',
@@ -430,7 +502,17 @@
       return tile;
     });
     gridEl.append(...tiles);
-    filterBarEl = h('div', { class: 'filterbar' });
+    actionsEl = h('div', { class: 'actions' });
+    menuEl = h('div', {
+      class: 'menu',
+      role: 'menu',
+      'aria-label': 'Filter and view options',
+      onclick: (e) => e.stopPropagation(),
+      onkeydown: (e) => {
+        e.stopPropagation(); // not the grid's rating keys
+        if (e.key === 'Escape') setMenu(false, true);
+      },
+    });
 
     detailsEl = h('aside', { class: 'details', 'aria-label': 'Photo details' });
     renderDetails(undefined);
@@ -447,13 +529,11 @@
             { class: 'toolbar' },
             h('div', { class: 'grow' }, crumbs(state.crumbs)),
             countEl,
-            h('label', {}, 'Sort', sortSel),
-            h('label', {}, 'Size', size),
-            h('button', { class: 'icon-btn', 'aria-label': 'Refresh', title: 'Refresh', onclick: () => post({ type: 'refresh' }) }, icon('refresh')),
+            actionsEl,
           ),
-          photos.length ? filterBarEl : null,
           photos.length ? gridEl : h('div', { class: 'message' }, 'No photos in this folder. Sub-folders are in the Photo Libraries tree.'),
         ),
+        panelResizer(detailsEl, state.detailsWidth),
         detailsEl,
       ),
     );
@@ -522,7 +602,7 @@
     const known = thumbs.get(d.photo.name);
     const url = d.thumb ? blobUrl(d.thumb, 'image/webp') : known?.url;
     const preview = url
-      ? h('img', { class: 'preview', src: url, alt: '', 'data-vscode-context': photoContext(d.photo.name) })
+      ? h('img', { class: 'preview', src: url, alt: d.photo.name, 'data-vscode-context': photoContext(d.photo.name) })
       : h('div', { class: 'preview raw-placeholder', 'aria-hidden': 'true' }, icon('photo', 22), d.photo.ext);
     const ratingBlock = h(
       'div',
@@ -549,10 +629,9 @@
         'details',
         'DETAILS',
         preview,
-        h('div', {}, h('div', { class: 'name' }, d.photo.name), d.more > 0 ? h('div', { class: 'sub' }, `+ ${d.more} more selected`) : null),
+        h('div', {}, h('div', { class: 'name', title: d.photo.name }, d.photo.name), d.more > 0 ? h('div', { class: 'sub' }, `+ ${d.more} more selected`) : null),
         ratingBlock,
         detailsList(d.rows),
-        h('p', { class: 'hint-small' }, 'Double-click to open · right-click for Move to… and Reveal in OS'),
       ),
     ];
     if (c.auto) {
@@ -602,6 +681,10 @@
   // Grid keys work wherever focus is in the tab (e.g. after a flagged photo was filtered away).
   window.addEventListener('keydown', (e) => {
     if (gridEl && !gridEl.contains(e.target)) onKey(e);
+  });
+
+  document.addEventListener('click', () => {
+    if (menuOpen) setMenu(false);
   });
 
   window.addEventListener('message', (e) => {

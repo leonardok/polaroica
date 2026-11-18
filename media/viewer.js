@@ -2,9 +2,13 @@
 // The cached thumbnail shows at once, scaled up, while the original streams in from the share.
 // With ADJUST open, or when the photo has edits, the photo is drawn with WebGL (adjust.js).
 (function () {
-  const { vscode, h, icon, crumbs, detailsList, blobUrl, section, photoContext, rankExplanation, keyBelongsToControl } = window.vsphoto;
+  const { vscode, h, icon, crumbs, detailsList, panelResizer, closedByDefault, sectionOpen, blobUrl, section, photoContext, rankExplanation, keyBelongsToControl } = window.vsphoto;
+  // The photo tab opens with only ADJUST expanded; DETAILS and AUTO-RANK stay folded until opened.
+  closedByDefault.add('details');
+  closedByDefault.add('autorank');
   const A = window.vsphotoAdjust;
   const app = document.getElementById('app');
+  // 'fit', 'full' (one photo pixel per screen pixel) or a pinch-zoom scale (CSS px per photo px).
   let zoom = (vscode.getState() || {}).zoom || 'fit';
   let detailsBody, adjustSection, frameEl, noteEl, current, beforeBtn, undoBtn, redoBtn, stripCurrentDot;
   let urls = []; // object URLs of the current render, revoked on the next
@@ -43,7 +47,7 @@
   });
 
   function adjustOpen() {
-    return !((vscode.getState() || {}).closedSections || []).includes('adjust');
+    return sectionOpen('adjust');
   }
 
   function glWanted() {
@@ -63,6 +67,7 @@
     redo = [];
     glName = undefined;
     wantBytesFor = undefined;
+    panel.setReference(undefined); // this photo's own temperature arrives separately
     panel.set(edits);
     panel.setCanPaste(!!m.canPaste);
     panel.drawHistogram(undefined);
@@ -80,11 +85,12 @@
 
     noteEl = h('div', { class: 'loading', role: 'status' }, 'Loading photo…');
     frameEl = h('div', {
-      class: 'frame ' + zoom,
+      class: 'frame ' + (zoom === 'fit' ? 'fit' : 'full'),
       ondblclick: () => post({ type: 'grid' }),
       title: 'Double-click to go back to the grid · right-click for more',
       'data-vscode-context': photoContext(m.photo.name),
     });
+    frameEl.addEventListener('wheel', pinchZoom, { passive: false });
     if (m.thumb) {
       frameEl.append(h('img', { class: 'photo standin' + (m.thumbQuick ? ' soft' : ''), src: track(blobUrl(m.thumb, 'image/webp')), alt: '' }));
     }
@@ -161,8 +167,9 @@
             h('button', { class: 'nav', 'aria-label': 'Next photo (→)', title: 'Next (→)', onclick: () => post({ type: 'step', delta: 1 }) }, icon('right', 18)),
           ),
           rateBarEl,
-          h('footer', { class: 'film' }, strip, h('p', { class: 'hint' }, '← → previous / next · P / X / U flag · 0–5 stars · \\ before/after · double-click for the grid · right-click for more')),
+          h('footer', { class: 'film' }, strip),
         ),
+        panelResizer(aside, m.detailsWidth),
         aside,
       ),
     );
@@ -248,6 +255,10 @@
       if (current !== for_) {
         return;
       }
+      if (!for_.photo.raw) {
+        // A JPEG records no temperature: estimate it from the picture (RAW: the camera's, sent by the extension).
+        panel.setReference({ kelvin: A.estimateKelvin(bitmap), source: 'estimated' });
+      }
       if (!renderer) {
         glCanvas = h('canvas', { class: 'photo main gl ready' });
         renderer = new A.Renderer(glCanvas);
@@ -287,6 +298,9 @@
     if (zoom === 'full') {
       cssW = w / dpr; // one photo pixel per screen pixel
       cssH = hgt / dpr;
+    } else if (typeof zoom === 'number') {
+      cssW = w * zoom; // pinch zoom
+      cssH = hgt * zoom;
     } else {
       const s = Math.min(frameEl.clientWidth / w, frameEl.clientHeight / hgt);
       cssW = w * s;
@@ -420,17 +434,53 @@
 
   function setZoom(z) {
     zoom = z;
-    vscode.setState({ ...(vscode.getState() || {}), zoom });
+    if (typeof z === 'string') {
+      vscode.setState({ ...(vscode.getState() || {}), zoom }); // a pinch scale is not kept across reloads
+    }
     if (frameEl) {
       frameEl.classList.toggle('fit', z === 'fit');
-      frameEl.classList.toggle('full', z === 'full');
+      frameEl.classList.toggle('full', z !== 'fit');
     }
     document.querySelectorAll('.zoom .btn').forEach((b, i) => {
-      const on = (i === 0) === (z === 'fit');
+      const on = i === 0 ? z === 'fit' : z === 'full';
       b.classList.toggle('on', on);
       b.setAttribute('aria-pressed', String(on));
     });
     layoutCanvas();
+  }
+
+  /**
+   * Pinch on a trackpad (Chromium reports it as a wheel event with Ctrl held), or Ctrl/⌘ + mouse
+   * wheel: zoom around the pointer, from Fit up to 400%. Zooming out past Fit snaps back to Fit.
+   */
+  function pinchZoom(e) {
+    if (!e.ctrlKey && !e.metaKey) {
+      return; // plain scrolling pans the zoomed photo
+    }
+    e.preventDefault();
+    if (!renderer || !glName || !glCanvas.isConnected || !renderer.width) {
+      setZoom(e.deltaY < 0 ? 'full' : 'fit'); // not drawn with WebGL: just Fit / 100%
+      return;
+    }
+    const w = renderer.width;
+    const hgt = renderer.height;
+    const dpr = window.devicePixelRatio || 1;
+    const fit = Math.min(frameEl.clientWidth / w, frameEl.clientHeight / hgt);
+    const now = zoom === 'fit' ? fit : zoom === 'full' ? 1 / dpr : zoom;
+    const delta = Math.max(-50, Math.min(50, e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY));
+    const next = Math.min(Math.max(fit, 4 / dpr), now * Math.exp(-delta * 0.01));
+    // Keep the photo point under the pointer where it is.
+    const r = glCanvas.getBoundingClientRect();
+    const rx = (e.clientX - r.left) / r.width;
+    const ry = (e.clientY - r.top) / r.height;
+    if (next <= fit * 1.01) {
+      if (zoom !== 'fit') setZoom('fit');
+      return;
+    }
+    setZoom(Math.abs(next * dpr - 1) < 0.01 ? 'full' : next);
+    const r2 = glCanvas.getBoundingClientRect();
+    frameEl.scrollLeft += r2.left + rx * r2.width - e.clientX;
+    frameEl.scrollTop += r2.top + ry * r2.height - e.clientY;
   }
 
   // ---- rating bar ------------------------------------------------------------------------------
@@ -498,9 +548,8 @@
       return;
     }
     detailsBody.replaceChildren(
-      h('div', { class: 'name' }, current?.photo.name || ''),
+      h('div', { class: 'name', title: current?.photo.name || '' }, current?.photo.name || ''),
       detailsList(rows),
-      h('p', { class: 'hint-small' }, 'Right-click the photo for Move to… and Reveal in OS'),
     );
   }
 
@@ -574,6 +623,11 @@
           } else {
             noteEl.textContent = 'This RAW file has no preview we can show.';
           }
+        }
+        break;
+      case 'whiteBalance':
+        if (current && current.photo.name === m.name) {
+          panel.setReference({ kelvin: m.kelvin, source: m.source });
         }
         break;
       case 'bytes':

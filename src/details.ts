@@ -62,7 +62,14 @@ export async function detailRows(store: PhotoStore, p: Photo): Promise<DetailRow
     rows.push({ label: 'Dimensions', value: `${exif.width} × ${exif.height}` });
   }
   rows.push({ label: 'File size', value: formatBytes(p.size) });
-  rows.push({ label: 'Modified', value: new Date(p.mtime).toLocaleString() });
+  rows.push({ label: 'Modified', value: formatLocalDate(p.mtime) });
   rows.push({ label: 'Location', value: path.dirname(p.uri.fsPath) });
   return rows;
+}
+
+/** "2023-03-06 23:50", the same shape as the Taken date. */
+export function formatLocalDate(ms: number): string {
+  const d = new Date(ms);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }

@@ -4,7 +4,8 @@
  * Also: matching a RAW decode's tones to the camera's own preview. No `vscode` import.
  */
 import { Rgba } from './image';
-import { CurvePoint, Curves, Edits, isDefault } from './xmp';
+import { kelvinGains } from './whiteBalance';
+import { CurvePoint, Curves, Edits, hasKelvin, isDefault } from './xmp';
 
 /** Monotone cubic (Fritsch–Carlson) through the points, as 256 values 0–1 (same as adjust.js). */
 export function curveTable(points: CurvePoint[]): Float32Array {
@@ -95,15 +96,13 @@ export function applyEdits(img: Rgba, e: Edits): Rgba {
   const sh = e.shadows / 100;
   const wh = e.whites / 100;
   const bl = e.blacks / 100;
-  const temp = e.temp / 100;
-  const tint = e.tint / 100;
   const vib = e.vibrance / 100;
   const sat = e.saturation / 100;
   const bp = -0.12 * bl;
   const wp = 1 - 0.12 * wh;
   const span = Math.max(wp - bp, 0.05);
   // Exposure, white balance and whites/blacks act on each channel alone: one table per channel.
-  const wb = [1 + 0.25 * temp, 1 - 0.18 * tint, 1 - 0.25 * temp];
+  const wb = whiteBalanceGains(e);
   const pre = [0, 1, 2].map((c) => {
     const t = new Float32Array(256);
     for (let v = 0; v < 256; v++) t[v] = (toSrgb(toLin(v / 255) * exp * wb[c]) - bp) / span;
@@ -229,4 +228,21 @@ export function rgbToRgba(rgb: Uint8Array | Uint8ClampedArray, width: number, he
     out[i * 4 + 3] = 255;
   }
   return { data: out, width, height };
+}
+
+/**
+ * White balance as per-channel gains in linear light (the shader's u_wb): the relative
+ * Temperature of older edits, Tint, and a Kelvin white balance against the photo's own.
+ */
+export function whiteBalanceGains(e: Pick<Edits, 'temp' | 'tint' | 'kelvin' | 'kelvinRef'>): [number, number, number] {
+  const temp = e.temp / 100;
+  const tint = e.tint / 100;
+  const g: [number, number, number] = [1 + 0.25 * temp, 1 - 0.18 * tint, 1 - 0.25 * temp];
+  if (hasKelvin(e)) {
+    const k = kelvinGains(e.kelvinRef, e.kelvin);
+    g[0] *= k[0];
+    g[1] *= k[1];
+    g[2] *= k[2];
+  }
+  return g;
 }

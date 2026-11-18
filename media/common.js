@@ -42,6 +42,7 @@
     redo: 'M11 6H6a3 3 0 0 0 0 6h3M9 3.5L11.5 6 9 8.5',
     trash: 'M2.5 4h11M6 4V2.5h4V4M4 4l.7 9.5h6.6L12 4M6.5 6.5v5M9.5 6.5v5',
     export: 'M8 10V2M5 5l3-3 3 3M3 9v4.5h10V9',
+    filter: 'M2.5 3.5h11L9.5 8.5v4l-3 1.5V8.5z',
   };
   function icon(name, size) {
     const s = document.createElementNS(SVG_NS, 'svg');
@@ -71,12 +72,89 @@
     return el;
   }
 
+  /** Label / value rows, one line each: a value too long for the panel ends in "…" (full text on hover). */
   function detailsList(rows) {
     const dl = h('dl');
     for (const r of rows || []) {
-      dl.append(h('dt', {}, r.label), h('dd', {}, r.value));
+      const path = r.label === 'Location';
+      dl.append(
+        h('dt', { title: r.label }, r.label),
+        // A path is cut at its start, so the end (the album) stays in view.
+        h('dd', { class: path ? 'path' : '', title: `${r.label}: ${r.value}` }, path ? h('bdi', { dir: 'ltr' }, r.value) : r.value),
+      );
     }
     return dl;
+  }
+
+  /**
+   * A drag handle on the left edge of the side panel: drag (or ←/→ when focused) to change its
+   * width, double-click for the default. The width is sent to the extension, which remembers it
+   * for every tab ({ type: 'detailsWidth', width }, 0 = default).
+   */
+  const PANEL_MIN = 220;
+  const PANEL_MAX = 640;
+  function setPanelWidth(panel, w) {
+    panel.style.flex = w ? `0 0 ${w}px` : '';
+    panel.style.width = w ? w + 'px' : '';
+    panel.style.maxWidth = w ? 'none' : '';
+  }
+  function panelResizer(panel, width) {
+    setPanelWidth(panel, width || 0);
+    const handle = h('div', {
+      class: 'resizer',
+      role: 'separator',
+      tabindex: '0',
+      'aria-orientation': 'vertical',
+      'aria-label': 'Resize the side panel',
+      'aria-valuemin': String(PANEL_MIN),
+      'aria-valuemax': String(PANEL_MAX),
+      title: 'Drag to resize · double-click for the default width',
+    });
+    let saveTimer;
+    const save = (w) => {
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => vscode.postMessage({ type: 'detailsWidth', width: w }), 250);
+    };
+    const set = (w) => {
+      const max = Math.max(PANEL_MIN, Math.min(PANEL_MAX, window.innerWidth - 360));
+      w = Math.round(Math.max(PANEL_MIN, Math.min(max, w)));
+      setPanelWidth(panel, w);
+      handle.setAttribute('aria-valuenow', String(w));
+      save(w);
+    };
+    handle.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      handle.setPointerCapture(e.pointerId);
+      const x0 = e.clientX;
+      const w0 = panel.getBoundingClientRect().width;
+      handle.classList.add('dragging');
+      document.body.classList.add('resizing');
+      const move = (ev) => set(w0 + (x0 - ev.clientX));
+      const up = () => {
+        handle.classList.remove('dragging');
+        document.body.classList.remove('resizing');
+        handle.removeEventListener('pointermove', move);
+        handle.removeEventListener('pointerup', up);
+        handle.removeEventListener('pointercancel', up);
+      };
+      handle.addEventListener('pointermove', move);
+      handle.addEventListener('pointerup', up);
+      handle.addEventListener('pointercancel', up);
+    });
+    handle.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        e.preventDefault();
+        e.stopPropagation(); // not the tab's own arrow keys
+        set(panel.getBoundingClientRect().width + (e.key === 'ArrowLeft' ? 16 : -16));
+      }
+    });
+    handle.addEventListener('dblclick', () => {
+      setPanelWidth(panel, 0);
+      handle.removeAttribute('aria-valuenow');
+      save(0);
+    });
+    return handle;
   }
 
   /**
@@ -173,26 +251,24 @@
 
   /**
    * A collapsible panel section (DETAILS, ADJUST…). Open/closed is remembered per section id
-   * across photos and reloads of the tab.
+   * across photos and reloads of the tab; until you toggle it, a section is open unless the page
+   * lists it in `closedByDefault`.
    */
+  const closedByDefault = new Set();
+  function sectionOpen(id) {
+    const saved = ((vscode.getState() || {}).sections || {})[id];
+    return saved === undefined ? !closedByDefault.has(id) : saved;
+  }
   function section(id, title, ...children) {
-    const state = vscode.getState() || {};
-    const closed = (state.closedSections || []).includes(id);
     const el = h(
       'details',
-      { class: 'section', open: !closed, dataset: { section: id } },
+      { class: 'section', open: sectionOpen(id), dataset: { section: id } },
       h('summary', {}, h('span', { class: 'chevron', 'aria-hidden': 'true' }, icon('right', 12)), title),
       h('div', { class: 'section-body' }, ...children),
     );
     el.addEventListener('toggle', () => {
       const st = vscode.getState() || {};
-      const set = new Set(st.closedSections || []);
-      if (el.open) {
-        set.delete(id);
-      } else {
-        set.add(id);
-      }
-      vscode.setState({ ...st, closedSections: [...set] });
+      vscode.setState({ ...st, sections: { ...(st.sections || {}), [id]: el.open } });
     });
     return el;
   }
@@ -285,5 +361,5 @@
     return navKey && (tag === 'SELECT' || (tag === 'INPUT' && t.type === 'range'));
   }
 
-  window.vsphoto = { vscode, h, icon, crumbs, detailsList, picture, blobUrl, bytes, makeThumbnail, section, photoContext, radar, rankExplanation, keyBelongsToControl };
+  window.vsphoto = { vscode, h, icon, crumbs, detailsList, panelResizer, closedByDefault, sectionOpen, picture, blobUrl, bytes, makeThumbnail, section, photoContext, radar, rankExplanation, keyBelongsToControl };
 })();

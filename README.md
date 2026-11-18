@@ -15,8 +15,9 @@ can already reach.
   photo that is already open focuses its tab. In a photo tab, **← →** go to the previous / next
   photo, the filmstrip jumps to a neighbour, and a double-click goes back to the grid.
 - **Adjust** (photo tab, collapsible **ADJUST** section): histogram; Exposure, Contrast,
-  Highlights, Shadows, Whites, Blacks; a tone curve (RGB, R, G, B: click to add a point, drag,
-  double-click to remove); Temperature, Tint, Vibrance, Saturation. Drawn live with WebGL.
+  Highlights, Shadows, Whites, Blacks; Temperature (in Kelvin, starting from the photo's own:
+  the camera's as-shot white balance for RAW files, an estimate from the picture for JPEGs),
+  Tint, Vibrance, Saturation. Drawn live with WebGL. (Tone curves saved by earlier versions still apply; Reset clears them.)
   **Before / After** (or hold `\`), undo / redo (Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z), Reset, Copy
   Settings / Paste. Edits are **non-destructive**: they are saved to
   `.sidecar/<photo name>.xmp` in the photo's folder (hidden from the library) and the photo file is

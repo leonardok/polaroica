@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { cpuCores } from './core/codec';
 import { ExportPool } from './core/exporter';
-import { extensionOf, isRaw, nextFreeName } from './core/images';
+import { EXPORT_FOLDER, extensionOf, isRaw, nextFreeName } from './core/images';
 import { isDefault } from './core/xmp';
 import { EditStore } from './edits';
 import { Libraries } from './libraries';
@@ -85,7 +85,7 @@ export class PhotoExporter {
   private async pickTarget(folder: vscode.Uri, what: string): Promise<vscode.Uri | undefined> {
     const recents = this.context.globalState.get<string[]>(RECENT_TARGETS, []).filter((p) => fs.existsSync(p));
     type Item = vscode.QuickPickItem & { uri?: vscode.Uri; choose?: boolean };
-    const inside = vscode.Uri.file(path.join(folder.fsPath, 'Export'));
+    const inside = vscode.Uri.file(path.join(folder.fsPath, EXPORT_FOLDER));
     const items: Item[] = [
       { label: '$(new-folder) Export folder in this album', description: inside.fsPath, uri: inside },
       ...recents

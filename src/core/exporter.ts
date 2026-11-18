@@ -8,6 +8,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { pathToFileURL } from 'url';
 import { Worker } from 'worker_threads';
+import { asShotKelvin } from './whiteBalance';
 import { applyEdits, matchToPreview, rgbToRgba } from './develop';
 import { embeddedPreviews, readExif } from './exif';
 import { downscale, orient, Rgba } from './image';
@@ -47,6 +48,7 @@ interface LibRawModule {
   LibRaw: new () => {
     open(buf: Uint8Array, settings: Record<string, unknown>): unknown;
     imageData(): { width: number; height: number; colors: number; bits: number; data: Uint8Array | Uint16Array };
+    metadata(full?: boolean): { color_data?: { cam_mul?: number[]; cam_xyz?: number[][] } } | undefined;
     delete?(): void;
   };
 }
@@ -112,6 +114,32 @@ async function rawReference(file: Uint8Array): Promise<Rgba | undefined> {
     }
   }
   return undefined;
+}
+
+/**
+ * A RAW file's as-shot white balance in Kelvin. LibRaw only parses the header here (no decoding);
+ * the first 256 KB hold the white-balance tags in the files tried (Sony ARW, Nikon NEF).
+ */
+export async function rawAsShotKelvin(fsPath: string): Promise<number | undefined> {
+  const fh = await fs.promises.open(fsPath, 'r');
+  let head: Uint8Array;
+  try {
+    const buf = Buffer.alloc(256 * 1024);
+    const { bytesRead } = await fh.read(buf, 0, buf.length, 0);
+    head = new Uint8Array(buf.buffer, buf.byteOffset, bytesRead);
+  } finally {
+    await fh.close();
+  }
+  const M = await libRaw();
+  const lr = new M.LibRaw();
+  try {
+    lr.open(head, {});
+    return asShotKelvin(lr.metadata(true)?.color_data);
+  } catch {
+    return undefined;
+  } finally {
+    lr.delete?.();
+  }
 }
 
 /** Full-size pixels of a RAW file, upright. */

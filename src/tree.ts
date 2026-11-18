@@ -32,6 +32,8 @@ export class LibraryTree implements vscode.TreeDataProvider<TreeNode>, vscode.Tr
   private readonly info = new Map<string, { photos: number; subfolders: number; picks?: number }>();
   /** Set by the extension: pick counts per album (from the sidecars). */
   picksIn?: (folder: string) => Promise<number>;
+  /** Set by the extension: the media folder, for the tree's own icons. */
+  media?: vscode.Uri;
   private readonly offline = new Set<string>();
   private readonly nodes = new Map<string, FolderNode>();
 
@@ -63,6 +65,17 @@ export class LibraryTree implements vscode.TreeDataProvider<TreeNode>, vscode.Tr
     }
   }
 
+  /** One of the tree's own icons (media/<name>-light.svg and -dark.svg). */
+  private icon(name: string): vscode.TreeItem['iconPath'] {
+    if (!this.media) {
+      return new vscode.ThemeIcon(name === 'library-smb' ? 'server' : name === 'library-local' ? 'device-desktop' : 'file-media');
+    }
+    return {
+      light: vscode.Uri.joinPath(this.media, `${name}-light.svg`),
+      dark: vscode.Uri.joinPath(this.media, `${name}-dark.svg`),
+    };
+  }
+
   refresh(): void {
     this.offline.clear();
     this.store.invalidate();
@@ -84,9 +97,7 @@ export class LibraryTree implements vscode.TreeDataProvider<TreeNode>, vscode.Tr
       );
       item.iconPath = isOffline
         ? new vscode.ThemeIcon('debug-disconnect', new vscode.ThemeColor('list.warningForeground'))
-        : kind === 'smb'
-          ? new vscode.ThemeIcon('server', new vscode.ThemeColor('charts.green'))
-          : new vscode.ThemeIcon('device-desktop', new vscode.ThemeColor('charts.blue'));
+        : this.icon(kind === 'smb' ? 'library-smb' : 'library-local');
       item.contextValue = isOffline ? 'library.offline' : 'library';
       if (!isOffline) {
         item.command = { command: 'vsphoto.openFolder', title: 'Open', arguments: [node.uri] };
@@ -95,15 +106,16 @@ export class LibraryTree implements vscode.TreeDataProvider<TreeNode>, vscode.Tr
     }
     const name = path.basename(node.uri.fsPath);
     const info = this.info.get(node.uri.fsPath);
-    // A folder without sub-folders is an album: a leaf (no twistie) with an album icon.
+    // A folder with photos is an album, whether or not it also has sub-folders (nested albums).
+    // Only folders with sub-folders get a twistie.
     const leaf = info !== undefined && info.subfolders === 0;
-    const album = leaf && info.photos > 0;
+    const album = info !== undefined && info.photos > 0;
     const item = new vscode.TreeItem(
       name,
       leaf ? vscode.TreeItemCollapsibleState.None : vscode.TreeItemCollapsibleState.Collapsed,
     );
     item.id = 'dir:' + node.uri.toString();
-    item.iconPath = album ? new vscode.ThemeIcon('file-media') : vscode.ThemeIcon.Folder;
+    item.iconPath = album ? this.icon('album') : new vscode.ThemeIcon('folder', new vscode.ThemeColor('charts.yellow'));
     item.resourceUri = node.uri;
     item.contextValue = 'folder';
     item.tooltip = node.uri.fsPath;

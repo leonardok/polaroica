@@ -129,7 +129,9 @@ input[type='range'] {
 }
 .details .name {
   font-weight: 600;
-  word-break: break-all;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .details .sub {
   font-size: 12px;
@@ -138,16 +140,62 @@ input[type='range'] {
 .details dl {
   margin: 0;
   display: grid;
-  grid-template-columns: 80px minmax(0, 1fr);
-  gap: 8px;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 6px 10px;
   font-size: 12px;
+}
+.details dt,
+.details dd {
+  margin: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .details dt {
   color: var(--muted);
 }
-.details dd {
-  margin: 0;
-  word-break: break-word;
+/* A path: cut at the start ("…/2023/02 Batizado"), so the album name stays in view. */
+.details dd.path {
+  direction: rtl;
+  text-align: left;
+}
+
+/* The side panel's drag handle (between the photos and the panel). */
+.resizer {
+  position: relative;
+  z-index: 5;
+  flex: 0 0 6px;
+  margin: 0 -3px;
+  cursor: col-resize;
+  touch-action: none;
+}
+.resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  width: 2px;
+  background: transparent;
+  transition: background 0.1s 0.15s;
+}
+.resizer:hover::after,
+.resizer.dragging::after,
+.resizer:focus-visible::after {
+  background: var(--vscode-sash-hoverBorder, var(--accent));
+  transition-delay: 0s;
+}
+.resizer:focus-visible {
+  outline: none;
+}
+body.resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+@media (max-width: 759px) {
+  .resizer {
+    display: none;
+  }
 }
 .details .actions {
   display: flex;
@@ -159,6 +207,7 @@ input[type='range'] {
 }
 .details .preview {
   width: 100%;
+  max-height: 260px; /* a wide panel keeps room for the details below */
   aspect-ratio: 3 / 2;
   object-fit: contain;
   background: rgba(128, 128, 128, 0.12);
