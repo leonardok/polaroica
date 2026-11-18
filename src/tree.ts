@@ -28,7 +28,8 @@ export class LibraryTree implements vscode.TreeDataProvider<TreeNode>, vscode.Tr
   readonly dropMimeTypes = [TREE_MIME, 'text/uri-list'];
   readonly dragMimeTypes = ['text/uri-list'];
 
-  private readonly counts = new Map<string, number>();
+  /** What we know about a folder's contents: photo count and whether it has sub-folders. */
+  private readonly info = new Map<string, { photos: number; subfolders: number }>();
   private readonly offline = new Set<string>();
   private readonly nodes = new Map<string, FolderNode>();
 
@@ -39,11 +40,11 @@ export class LibraryTree implements vscode.TreeDataProvider<TreeNode>, vscode.Tr
   ) {
     store.onDidChange((folder) => {
       if (!folder) {
-        this.counts.clear();
+        this.info.clear();
         this.changed.fire(undefined);
         return;
       }
-      this.counts.delete(folder.fsPath);
+      this.info.delete(folder.fsPath);
       // Refresh the parent so the folder's own row (count) and its children are redrawn.
       const node = this.nodes.get(folder.fsPath);
       this.changed.fire(node ? node.parent : undefined);
@@ -81,17 +82,21 @@ export class LibraryTree implements vscode.TreeDataProvider<TreeNode>, vscode.Tr
       return item;
     }
     const name = path.basename(node.uri.fsPath);
-    const item = new vscode.TreeItem(name, vscode.TreeItemCollapsibleState.Collapsed);
+    const info = this.info.get(node.uri.fsPath);
+    // A folder without sub-folders is an album: a leaf (no twistie) with an album icon.
+    const leaf = info !== undefined && info.subfolders === 0;
+    const album = leaf && info.photos > 0;
+    const item = new vscode.TreeItem(
+      name,
+      leaf ? vscode.TreeItemCollapsibleState.None : vscode.TreeItemCollapsibleState.Collapsed,
+    );
     item.id = 'dir:' + node.uri.toString();
-    item.iconPath = vscode.ThemeIcon.Folder;
+    item.iconPath = album ? new vscode.ThemeIcon('file-media') : vscode.ThemeIcon.Folder;
     item.resourceUri = node.uri;
     item.contextValue = 'folder';
     item.tooltip = node.uri.fsPath;
-    if (showCounts) {
-      const count = this.counts.get(node.uri.fsPath);
-      if (count !== undefined) {
-        item.description = count ? count.toLocaleString() : '';
-      }
+    if (showCounts && info?.photos) {
+      item.description = info.photos.toLocaleString();
     }
     item.command = { command: 'vsphoto.openFolder', title: 'Open', arguments: [node.uri] };
     return item;
@@ -139,22 +144,21 @@ export class LibraryTree implements vscode.TreeDataProvider<TreeNode>, vscode.Tr
       this.nodes.set(child.uri.fsPath, child);
       return child;
     });
-    void this.loadCounts(children);
+    // Know which children are albums before drawing them (instant from the local index); for
+    // slow, never-seen folders don't hold the tree up: they update when their listing arrives.
+    await Promise.race([this.loadInfo(children), new Promise((r) => setTimeout(r, 300))]);
     return children;
   }
 
-  private async loadCounts(children: FolderNode[]): Promise<void> {
-    if (!vscode.workspace.getConfiguration('vsphoto').get<boolean>('showPhotoCounts', true)) {
-      return;
-    }
-    const missing = children.filter((c) => !this.counts.has(c.uri.fsPath));
+  private async loadInfo(children: FolderNode[]): Promise<void> {
+    const missing = children.filter((c) => !this.info.has(c.uri.fsPath));
     await mapLimit(missing, 4, async (c) => {
       try {
         const listing = await this.store.listing(c.uri);
-        this.counts.set(c.uri.fsPath, listing.photos.length);
+        this.info.set(c.uri.fsPath, { photos: listing.photos.length, subfolders: listing.folders.length });
         this.changed.fire(c);
       } catch {
-        /* unreadable folder: leave the count blank */
+        /* unreadable folder: keep it expandable, no count */
       }
     });
   }
