@@ -1,0 +1,195 @@
+{
+  "name": "vsphoto",
+  "displayName": "Photo Library",
+  "description": "Browse and organize photo libraries \u2014 local folders and SMB network shares \u2014 inside VS Code.",
+  "version": "0.1.0",
+  "publisher": "leonardok",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/leonardok/vsphoto"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Visualization",
+    "Other"
+  ],
+  "keywords": [
+    "photo",
+    "image",
+    "library",
+    "gallery",
+    "smb",
+    "nas"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "vsphoto",
+          "title": "Photo Library",
+          "icon": "media/library.svg"
+        }
+      ]
+    },
+    "views": {
+      "vsphoto": [
+        {
+          "id": "vsphoto.libraries",
+          "name": "Photo Libraries",
+          "icon": "media/library.svg"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "vsphoto.libraries",
+        "contents": "No photo libraries yet. A library is a local folder or an SMB share your computer can already reach.\n[Add Library](command:vsphoto.addLibrary)",
+        "when": "workbenchState == empty || workspaceFolderCount == 0"
+      }
+    ],
+    "commands": [
+      {
+        "command": "vsphoto.addLibrary",
+        "title": "Add Library\u2026",
+        "category": "Photo Library",
+        "icon": "$(add)"
+      },
+      {
+        "command": "vsphoto.refresh",
+        "title": "Refresh",
+        "category": "Photo Library",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "vsphoto.removeLibrary",
+        "title": "Remove Library",
+        "category": "Photo Library"
+      },
+      {
+        "command": "vsphoto.openFolder",
+        "title": "Open Photos",
+        "category": "Photo Library"
+      },
+      {
+        "command": "vsphoto.moveTo",
+        "title": "Move to\u2026",
+        "category": "Photo Library"
+      },
+      {
+        "command": "vsphoto.newFolder",
+        "title": "New Folder\u2026",
+        "category": "Photo Library"
+      },
+      {
+        "command": "vsphoto.revealInOS",
+        "title": "Reveal in OS",
+        "category": "Photo Library"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "vsphoto.addLibrary",
+          "when": "view == vsphoto.libraries",
+          "group": "navigation@1"
+        },
+        {
+          "command": "vsphoto.refresh",
+          "when": "view == vsphoto.libraries",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "vsphoto.openFolder",
+          "when": "view == vsphoto.libraries && viewItem =~ /^(library|folder)$/",
+          "group": "1_open@1"
+        },
+        {
+          "command": "vsphoto.newFolder",
+          "when": "view == vsphoto.libraries && viewItem =~ /^(library|folder)$/",
+          "group": "2_edit@1"
+        },
+        {
+          "command": "vsphoto.moveTo",
+          "when": "view == vsphoto.libraries && viewItem == folder",
+          "group": "2_edit@2"
+        },
+        {
+          "command": "vsphoto.revealInOS",
+          "when": "view == vsphoto.libraries && viewItem =~ /^(library|folder)$/",
+          "group": "3_reveal@1"
+        },
+        {
+          "command": "vsphoto.removeLibrary",
+          "when": "view == vsphoto.libraries && viewItem =~ /^library/",
+          "group": "9_library@1"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "vsphoto.removeLibrary",
+          "when": "false"
+        },
+        {
+          "command": "vsphoto.openFolder",
+          "when": "false"
+        },
+        {
+          "command": "vsphoto.moveTo",
+          "when": "false"
+        },
+        {
+          "command": "vsphoto.newFolder",
+          "when": "false"
+        },
+        {
+          "command": "vsphoto.revealInOS",
+          "when": "false"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Photo Library",
+      "properties": {
+        "vsphoto.sortBy": {
+          "type": "string",
+          "enum": [
+            "name",
+            "modified",
+            "size"
+          ],
+          "enumDescriptions": [
+            "File name (natural order: IMG_2 before IMG_10)",
+            "Date modified",
+            "File size"
+          ],
+          "default": "name",
+          "description": "Default order of photos in the grid and in photo tabs."
+        },
+        "vsphoto.showPhotoCounts": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show how many photos each folder holds in the Photo Libraries tree. Turn off for very slow shares."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "tsc -p ./ --noEmit",
+    "test": "tsc -p ./ && node --test out/test/*.test.js",
+    "package": "vsce package",
+    "vscode:prepublish": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "~1.85.0",
+    "typescript": "^5.4.0"
+  }
+}
