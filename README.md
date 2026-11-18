@@ -4,7 +4,7 @@ Browse and organize photo libraries inside VS Code. A **workspace is your photo 
 every **library** is a workspace folder: a local folder or an SMB network share your computer
 can already reach.
 
-- **Photo Libraries** view in the activity bar: each library is a root node, sub-folders below,
+- **Polaroica** in the activity bar (the **Libraries** view): each library is a root node, sub-folders below,
   with photo counts. Libraries that can't be reached show as *offline*.
 - **Add Library** with the **+** in the view title: a local folder, or a network share
   (`\\nas\photos`, `smb://nas/photos`, or a path where the share is mounted).

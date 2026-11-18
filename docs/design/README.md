@@ -12,7 +12,7 @@ owner's account, or share it from the page's Share menu).
 | File | Screen |
 | --- | --- |
 | `Main.dc.html` | Library view: libraries tree on the left, photo grid, details panel. Double-click opens a photo tab; ← → browse. |
-| `AddLibrary.dc.html` | Add Library, started from the **+** next to PHOTO LIBRARIES: local folder or SMB share, two steps. |
+| `AddLibrary.dc.html` | Add Library, started from the **+** next to LIBRARIES (Polaroica sidebar): local folder or SMB share, two steps. |
 | `Move.dc.html` | Moving photos: drag onto a folder in the tree, or **Move to…** picker, with a progress notification. |
 | `PhotoView.dc.html` | A photo open in its own tab: full view, prev / next, filmstrip, details. |
 | `canvas.json` | Canvas layout (artboard positions and titles). |
@@ -23,7 +23,7 @@ standalone pages.
 ## Decisions captured in the designs
 
 - The extension is a VS Code extension; a **workspace is a photo library collection** and every
-  library is a workspace folder, shown as a root node in the *Photo Libraries* view.
+  library is a workspace folder, shown as a root node in the *Libraries* view of the Polaroica sidebar.
 - Libraries are either local folders or **SMB shares the OS can already reach** (mounted /
   connected). The extension stores no credentials and speaks no network protocol itself.
 - Adding a library starts from the **+** in the view title.

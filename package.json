@@ -40,7 +40,7 @@
       "polaroica": [
         {
           "id": "polaroica.libraries",
-          "name": "Photo Libraries",
+          "name": "Libraries",
           "icon": "media/library.svg"
         }
       ]
@@ -248,7 +248,7 @@
         "polaroica.showPhotoCounts": {
           "type": "boolean",
           "default": true,
-          "description": "Show how many photos each folder holds in the Photo Libraries tree. Turn off for very slow shares."
+          "description": "Show how many photos each folder holds in the Libraries tree. Turn off for very slow shares."
         },
         "polaroica.thumbnailSize": {
           "type": "number",

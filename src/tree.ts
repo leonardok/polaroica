@@ -20,7 +20,7 @@ export class FolderNode {
 
 export type TreeNode = LibraryNode | FolderNode;
 
-/** The "Photo Libraries" view: libraries (workspace folders) as roots, sub-folders below. */
+/** The "Libraries" view: libraries (workspace folders) as roots, sub-folders below. */
 export class LibraryTree implements vscode.TreeDataProvider<TreeNode>, vscode.TreeDragAndDropController<TreeNode> {
   private readonly changed = new vscode.EventEmitter<TreeNode | undefined>();
   readonly onDidChangeTreeData = this.changed.event;

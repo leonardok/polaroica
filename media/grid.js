@@ -448,7 +448,7 @@
             h('button', { class: 'icon-btn', 'aria-label': 'Refresh', title: 'Refresh', onclick: () => post({ type: 'refresh' }) }, icon('refresh')),
           ),
           photos.length ? filterBarEl : null,
-          photos.length ? gridEl : h('div', { class: 'message' }, 'No photos in this folder. Sub-folders are in the Photo Libraries tree.'),
+          photos.length ? gridEl : h('div', { class: 'message' }, 'No photos in this folder. Sub-folders are in the Polaroica sidebar.'),
         ),
         detailsEl,
       ),

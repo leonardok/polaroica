@@ -186,7 +186,7 @@ export function activate(context: vscode.ExtensionContext): void {
         grids.open(uri);
         await ranker.run(uri);
       } else {
-        void vscode.window.showInformationMessage('Right-click an album in Photo Libraries, or use the Auto-Rank button in a grid.');
+        void vscode.window.showInformationMessage('Right-click an album in the Polaroica sidebar, or use the Auto-Rank button in a grid.');
       }
     }),
     vscode.commands.registerCommand('polaroica.showLog', () => output.show()),
