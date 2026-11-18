@@ -122,3 +122,181 @@
   background: #e0a85a;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
 }
+
+/* ---- culling ---- */
+.filterbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 20px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+.filterbar .grow {
+  flex: 1 1 auto;
+}
+.filterbar label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+.filterbar label.check {
+  color: var(--vscode-foreground);
+  cursor: pointer;
+}
+.filterbar .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  font-size: 12px;
+}
+.key-hint {
+  color: var(--muted);
+}
+.segmented {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 4px;
+  background: var(--vscode-input-background, rgba(128, 128, 128, 0.15));
+}
+.seg {
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  font-size: 12px;
+  cursor: pointer;
+}
+.seg.on {
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+}
+.seg-count {
+  color: var(--muted);
+}
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 20px;
+  background: var(--vscode-inputValidation-infoBackground, #0f2a40);
+  border-bottom: 1px solid var(--vscode-inputValidation-infoBorder, #1c4a6e);
+  font-size: 12px;
+}
+.banner .grow {
+  flex: 1;
+}
+.banner .btn {
+  height: 22px;
+  font-size: 12px;
+}
+.tile[hidden] {
+  display: none;
+}
+.badges {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.badges .flag {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  color: #fff;
+}
+.badges .flag svg {
+  stroke-width: 2.2;
+}
+.badges .flag.pick {
+  background: var(--pick);
+}
+.badges .flag.reject {
+  background: var(--reject);
+}
+.badges .stars {
+  position: absolute;
+  left: 6px;
+  bottom: 5px;
+  display: flex;
+  align-items: center;
+  padding: 1px 5px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.6);
+  color: var(--star);
+  font-size: 11px;
+  letter-spacing: 1px;
+}
+.badges .stack-badge {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  padding: 1px 7px;
+  border-radius: 9px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font-size: 11px;
+}
+/* Rejects are washed out: faded and partly drained of colour, still recognisable. */
+.tile.is-reject .thumb-img {
+  opacity: 0.35 !important;
+  filter: grayscale(0.6);
+}
+.tile.is-reject .label {
+  opacity: 0.5;
+}
+/* A stack of similar shots: two cards peeking out behind the best one. */
+.tile.stacked .thumb {
+  box-shadow: 3px -3px 0 -1px var(--vscode-editor-background), 4px -4px 0 0 rgba(128, 128, 128, 0.45), 7px -7px 0 -1px var(--vscode-editor-background), 8px -8px 0 0 rgba(128, 128, 128, 0.3);
+}
+.group-strip {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+}
+.group-item {
+  aspect-ratio: 3 / 2;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  overflow: hidden;
+  background: rgba(128, 128, 128, 0.2);
+  opacity: 0.65;
+  outline: 2px solid transparent;
+  outline-offset: 1px;
+  cursor: pointer;
+}
+.group-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.group-item.best {
+  opacity: 1;
+  outline-color: var(--pick);
+}
+.group-item.current {
+  opacity: 1;
+}
+.group-item:focus-visible {
+  outline-color: var(--accent);
+}
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}

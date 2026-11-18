@@ -27,3 +27,21 @@ test('untrusted edits are clamped and cleaned', () => {
   assert.deepEqual(e.curves.rgb, [[0, 0], [255, 0]]);
   assert.deepEqual(normalizeEdits(null), defaultEdits());
 });
+
+test('rating, flag and Auto-Rank details live in the same sidecar as edits', async () => {
+  const { readSidecar, toXmp: write, emptySidecar, isEmptySidecar } = await import('../core/xmp');
+  const sc = emptySidecar();
+  assert.ok(isEmptySidecar(sc));
+  sc.rating = 4;
+  sc.flag = 'pick';
+  sc.edits.exposure = 0.5;
+  sc.auto = { scores: { focus: 86, exposure: 96 }, group: { id: 'g1', size: 5, best: true }, reason: 'Best of 5 "similar" <shots>', at: '2026-11-18T10:00:00Z' };
+  const back = readSidecar(write(sc));
+  assert.equal(back.rating, 4);
+  assert.equal(back.flag, 'pick');
+  assert.equal(back.edits.exposure, 0.5);
+  assert.deepEqual(back.auto, sc.auto);
+  assert.ok(!isEmptySidecar(back));
+  // Files written before culling existed still read (no rating attribute).
+  assert.equal(readSidecar(write(emptySidecar().edits)).rating, 0);
+});

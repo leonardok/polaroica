@@ -2,7 +2,7 @@
 // The cached thumbnail shows at once, scaled up, while the original streams in from the share.
 // With ADJUST open, or when the photo has edits, the photo is drawn with WebGL (adjust.js).
 (function () {
-  const { vscode, h, icon, crumbs, detailsList, blobUrl, section, photoContext } = window.vsphoto;
+  const { vscode, h, icon, crumbs, detailsList, blobUrl, section, photoContext, rankExplanation, keyBelongsToControl } = window.vsphoto;
   const A = window.vsphotoAdjust;
   const app = document.getElementById('app');
   let zoom = (vscode.getState() || {}).zoom || 'fit';
@@ -22,6 +22,12 @@
   let wantBytesFor;
   let drawQueued = false;
   let histTimer;
+
+  // ---- culling state ----
+  let cull = null; // { rating, flag, auto } of the current photo
+  let progress = { picks: 0, rejects: 0, toGo: 0 };
+  let rateBarEl, stripFlagEl;
+  let autoAdvance = (vscode.getState() || {}).autoAdvance !== false;
 
   const post = (msg) => vscode.postMessage(msg);
   const track = (u) => (urls.push(u), u);
@@ -60,6 +66,8 @@
     panel.set(edits);
     panel.setCanPaste(!!m.canPaste);
     panel.drawHistogram(undefined);
+    cull = m.cull ? { ...m.cull } : null;
+    progress = m.progress || { picks: 0, rejects: 0, toGo: 0 };
     if (renderer) {
       renderer.bypass = false;
     }
@@ -93,19 +101,22 @@
       m.strip.map((s) => {
         const dot = h('span', { class: 'edited-dot', title: 'Edited' });
         dot.hidden = !s.edited;
+        const flagDot = h('span', { class: 'flag-dot' + (s.flag ? ' ' + s.flag : '') });
         if (s.index === m.index) {
           stripCurrentDot = dot;
+          stripFlagEl = flagDot;
         }
         return h(
           'button',
           {
-            class: 'strip-item' + (s.index === m.index ? ' current' : ''),
+            class: 'strip-item' + (s.index === m.index ? ' current' : '') + (s.flag === 'reject' ? ' is-reject' : ''),
             'aria-label': s.name + (s.edited ? ' (edited)' : ''),
             'aria-current': s.index === m.index ? 'true' : undefined,
             title: s.name,
             onclick: () => post({ type: 'goto', index: s.index }),
           },
           s.thumb ? h('img', { class: 'strip-img', src: track(blobUrl(s.thumb, 'image/webp')), alt: '' }) : h('div', { class: 'strip-img raw-placeholder' }, s.ext),
+          flagDot,
           dot,
         );
       }),
@@ -119,7 +130,12 @@
         requestBytes();
       }
     });
-    const aside = h('aside', { class: 'details', 'aria-label': 'Photo panel' }, section('details', 'DETAILS', detailsBody), adjustSection);
+    const autoSection = cull && cull.auto
+      ? section('autorank', h('span', { class: 'section-title' }, 'AUTO-RANK', h('span', { class: 'section-summary' }, icon('spark', 10), cull.auto.group && cull.auto.group.size > 1 ? (cull.auto.group.best ? ` best of ${cull.auto.group.size}` : ` 1 of ${cull.auto.group.size} similar`) : ' ranked')), rankExplanation(cull.auto))
+      : null;
+    const aside = h('aside', { class: 'details', 'aria-label': 'Photo panel' }, section('details', 'DETAILS', detailsBody), autoSection, adjustSection);
+    rateBarEl = h('div', { class: 'ratebar' });
+    paintRateBar();
 
     app.replaceChildren(
       h(
@@ -144,7 +160,8 @@
             frameEl,
             h('button', { class: 'nav', 'aria-label': 'Next photo (→)', title: 'Next (→)', onclick: () => post({ type: 'step', delta: 1 }) }, icon('right', 18)),
           ),
-          h('footer', { class: 'film' }, strip, h('p', { class: 'hint' }, '← → previous / next · \\ before/after · double-click to go back to the grid · right-click for more')),
+          rateBarEl,
+          h('footer', { class: 'film' }, strip, h('p', { class: 'hint' }, '← → previous / next · P / X / U flag · 0–5 stars · \\ before/after · double-click for the grid · right-click for more')),
         ),
         aside,
       ),
@@ -416,6 +433,66 @@
     layoutCanvas();
   }
 
+  // ---- rating bar ------------------------------------------------------------------------------
+
+  function paintRateBar() {
+    if (!rateBarEl) return;
+    const c = cull || {};
+    const spark = c.auto ? icon('spark', 10) : null;
+    if (spark) {
+      spark.setAttribute('fill', 'currentColor');
+      spark.setAttribute('stroke', 'none');
+      spark.classList.add('spark');
+    }
+    rateBarEl.replaceChildren(
+      h(
+        'div',
+        { class: 'flags' },
+        h('button', { class: 'flag-btn' + (c.flag === 'pick' ? ' pick' : ''), 'aria-pressed': String(c.flag === 'pick'), title: 'Pick (P)', onclick: () => rate({ flag: c.flag === 'pick' ? null : 'pick' }) }, icon('check', 12), 'Pick ', h('kbd', {}, 'P')),
+        h('button', { class: 'flag-btn' + (c.flag === 'reject' ? ' reject' : ''), 'aria-pressed': String(c.flag === 'reject'), title: 'Reject (X)', onclick: () => rate({ flag: c.flag === 'reject' ? null : 'reject' }) }, icon('x', 12), 'Reject ', h('kbd', {}, 'X')),
+      ),
+      h(
+        'div',
+        { class: 'star-row', role: 'radiogroup', 'aria-label': 'Stars' },
+        [1, 2, 3, 4, 5].map((k) => h('button', { class: 'star' + (k <= (c.rating || 0) ? ' on' : ''), role: 'radio', 'aria-checked': String(c.rating === k), 'aria-label': `${k} star${k > 1 ? 's' : ''}`, title: `${k} (key ${k})`, onclick: () => rate({ rating: c.rating === k ? 0 : k }) }, '★')),
+        spark,
+      ),
+      h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: autoAdvance, onchange: (e) => { autoAdvance = e.target.checked; vscode.setState({ ...(vscode.getState() || {}), autoAdvance }); } }), 'Auto-advance'),
+      h('span', { class: 'cull-progress' }, `${progress.picks} picks · ${progress.rejects} rejects · ${progress.toGo} to go`),
+    );
+  }
+
+  function rate(change) {
+    if (!current) return;
+    const before = (cull && cull.flag) || null;
+    cull = Object.assign({ rating: 0 }, cull || {});
+    if ('rating' in change) cull.rating = change.rating;
+    if ('flag' in change) cull.flag = change.flag || undefined;
+    delete cull.auto;
+    const after = cull.flag || null;
+    if (before !== after) {
+      // keep the counts right without asking the extension
+      if (before === 'pick') progress.picks--;
+      else if (before === 'reject') progress.rejects--;
+      else progress.toGo--;
+      if (after === 'pick') progress.picks++;
+      else if (after === 'reject') progress.rejects++;
+      else progress.toGo++;
+    }
+    post({ type: 'rate', name: current.photo.name, ...change });
+    paintRateBar();
+    if (stripFlagEl) {
+      stripFlagEl.className = 'flag-dot' + (cull.flag ? ' ' + cull.flag : '');
+      stripFlagEl.parentElement && stripFlagEl.parentElement.classList.toggle('is-reject', cull.flag === 'reject');
+    }
+    if (autoAdvance) {
+      const name = current.photo.name;
+      setTimeout(() => {
+        if (current && current.photo.name === name) post({ type: 'step', delta: 1 });
+      }, 180);
+    }
+  }
+
   function renderDetails(rows) {
     if (!detailsBody) {
       return;
@@ -447,10 +524,18 @@
       doRedo();
       return;
     }
-    if (e.altKey || mod || typing(e.target)) {
-      return; // arrows inside a slider adjust the slider
+    if (e.altKey || mod || keyBelongsToControl(e)) {
+      return; // e.g. arrows inside a slider adjust the slider
     }
-    if (e.key === '\\') {
+    if (e.key === 'p' || e.key === 'P') {
+      rate({ flag: 'pick' });
+    } else if (e.key === 'x' || e.key === 'X') {
+      rate({ flag: 'reject' });
+    } else if (e.key === 'u' || e.key === 'U') {
+      rate({ flag: null });
+    } else if (/^[0-5]$/.test(e.key)) {
+      rate({ rating: Number(e.key) });
+    } else if (e.key === '\\') {
       setBefore(true);
     } else if (e.key === 'ArrowLeft') {
       post({ type: 'step', delta: -1 });

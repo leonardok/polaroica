@@ -2,7 +2,7 @@
   "name": "vsphoto",
   "displayName": "Photo Library",
   "description": "Browse and organize photo libraries \u2014 local folders and SMB network shares \u2014 inside VS Code.",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "publisher": "leonardok",
   "license": "GPL-3.0-or-later",
   "repository": {
@@ -114,6 +114,12 @@
         "command": "vsphoto.photoReveal",
         "title": "Reveal in OS",
         "category": "Photo Library"
+      },
+      {
+        "command": "vsphoto.autoRank",
+        "title": "Auto-Rank Album\u2026",
+        "category": "Photo Library",
+        "icon": "$(sparkle)"
       }
     ],
     "menus": {
@@ -134,6 +140,11 @@
           "command": "vsphoto.openFolder",
           "when": "view == vsphoto.libraries && viewItem =~ /^(library|folder)$/",
           "group": "1_open@1"
+        },
+        {
+          "command": "vsphoto.autoRank",
+          "when": "view == vsphoto.libraries && viewItem =~ /^(library|folder)$/",
+          "group": "1_open@2"
         },
         {
           "command": "vsphoto.newFolder",
@@ -242,6 +253,13 @@
           "type": "boolean",
           "default": true,
           "description": "Build thumbnails for every photo in your libraries in the background: a quick pass from each photo's small EXIF preview, then sharp thumbnails from the camera's built-in preview (or the full file). Reads the share gently and waits while you browse."
+        },
+        "vsphoto.autoRank.burstSeconds": {
+          "type": "number",
+          "default": 2,
+          "minimum": 0.2,
+          "maximum": 30,
+          "description": "Auto-Rank: photos taken at most this many seconds apart (and looking alike) count as one burst of similar shots."
         }
       }
     }

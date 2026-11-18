@@ -18,12 +18,19 @@ type FromGrid =
   | { type: 'reveal'; name: string }
   | { type: 'sort'; key: SortKey }
   | { type: 'tileSize'; size: number }
+  | { type: 'rate'; names: string[]; rating?: number; flag?: 'pick' | 'reject' | null }
+  | { type: 'autoRank' }
+  | { type: 'undoAutoRank' }
+  | { type: 'makeBest'; name: string }
   | { type: 'onscreen'; names: string[] }
   | { type: 'decoded'; id: number; data?: unknown; w?: number; h?: number }
   | { type: 'refresh' };
 
 export interface GridHost {
   openPhoto(folder: vscode.Uri, name: string, sort: SortKey): void;
+  autoRank?(folder: vscode.Uri): void;
+  undoAutoRank?(folder: vscode.Uri): void;
+  makeBest?(folder: vscode.Uri, name: string): void;
 }
 
 /** One editor tab per folder showing its photos as a grid (the library view). */
@@ -54,9 +61,12 @@ export class GridPanels implements vscode.Disposable {
             edits.onDidChange((photo) => {
               const grid = this.panels.get(path.dirname(photo.fsPath));
               if (grid) {
-                void edits.editedIn(grid.folder.fsPath).then((names) =>
-                  post(grid.panel.webview, { type: 'edited', name: path.basename(photo.fsPath), edited: names.has(path.basename(photo.fsPath)) }),
-                );
+                const name = path.basename(photo.fsPath);
+                void edits.cullingIn(grid.folder.fsPath).then((map) => {
+                  post(grid.panel.webview, { type: 'cull', name, cull: map.get(name) ?? null });
+                  grid.cull.set(name, map.get(name));
+                  this.updateStatus();
+                });
               }
             }),
           ]
@@ -121,6 +131,14 @@ export class GridPanels implements vscode.Disposable {
     }
   }
 
+  /** Tell an open grid of this folder that Auto-Rank finished (banner with Undo). */
+  autoRankDone(folder: vscode.Uri, summary: string | undefined): void {
+    const grid = this.panels.get(folder.fsPath);
+    if (grid) {
+      void post(grid.panel.webview, { type: 'autoRankDone', summary });
+    }
+  }
+
   /** A thumbnail made by the background builder: show it in an open grid of its folder. */
   offer(photo: Photo, t: Thumb): void {
     const grid = this.panels.get(path.dirname(photo.uri.fsPath));
@@ -145,7 +163,18 @@ export class GridPanels implements vscode.Disposable {
     const lib = this.libraries.libraryOf(active.folder);
     const n = active.photos.length;
     const sel = active.selected.length;
-    this.status.text = `$(${lib && this.libraries.kind(lib) === 'smb' ? 'server' : 'device-desktop'}) ${n.toLocaleString()} photo${n === 1 ? '' : 's'}${sel ? ` · ${sel} selected` : ''}`;
+    let picks = 0;
+    let rejects = 0;
+    for (const p of active.photos) {
+      const c = active.cull.get(p.name);
+      if (c?.flag === 'pick') picks++;
+      else if (c?.flag === 'reject') rejects++;
+    }
+    this.status.text =
+      `$(${lib && this.libraries.kind(lib) === 'smb' ? 'server' : 'device-desktop'}) ${n.toLocaleString()} photo${n === 1 ? '' : 's'}` +
+      (picks ? ` · ${picks} picks` : '') +
+      (rejects ? ` · ${rejects} rejects` : '') +
+      (sel ? ` · ${sel} selected` : '');
     this.status.tooltip = active.folder.fsPath;
     this.status.show();
   }
@@ -166,6 +195,8 @@ export class GridPanels implements vscode.Disposable {
 class GridPanel {
   photos: Photo[] = [];
   selected: string[] = [];
+  /** Ratings and flags of this folder's photos (for the status bar). */
+  cull = new Map<string, import('./edits').CullInfo | undefined>();
   private sort: SortKey = sortSetting();
   private focus?: string;
   readonly job: ThumbJob;
@@ -229,14 +260,15 @@ class GridPanel {
     const names = new Set(this.photos.map((p) => p.name));
     this.selected = this.selected.filter((n) => names.has(n));
     const tileSize = this.owner.ctx.context.globalState.get<number>('vsphoto.tileSize', 160);
-    const editedNames = (await this.owner.ctx.edits?.editedIn(this.folder.fsPath)) ?? new Set<string>();
+    const cull = (await this.owner.ctx.edits?.cullingIn(this.folder.fsPath)) ?? new Map();
+    this.cull = new Map(cull);
     void post(this.webview, {
       type: 'init',
       crumbs: libraries.crumbs(this.folder),
       sort: this.sort,
       tileSize,
       selected: this.selected,
-      photos: this.photos.map((p) => ({ ...toView(this.webview, p), src: undefined, edited: editedNames.has(p.name) })),
+      photos: this.photos.map((p) => ({ ...toView(this.webview, p), src: undefined, cull: cull.get(p.name) ?? null })),
     });
     this.owner.updateStatus();
     this.job.setPhotos(this.photos);
@@ -303,6 +335,27 @@ class GridPanel {
       case 'sort':
         this.sort = m.key;
         await this.reload();
+        break;
+      case 'rate': {
+        const { edits } = this.owner.ctx;
+        if (edits && m.names.length) {
+          const change: { rating?: number; flag?: 'pick' | 'reject' | null } = {};
+          if (m.rating !== undefined) change.rating = m.rating;
+          if (m.flag !== undefined) change.flag = m.flag;
+          await edits.rate(m.names.map(uriOf), change).catch((err) => {
+            void vscode.window.showErrorMessage(`Could not save the rating: ${err instanceof Error ? err.message : String(err)}`);
+          });
+        }
+        break;
+      }
+      case 'autoRank':
+        host?.autoRank?.(this.folder);
+        break;
+      case 'undoAutoRank':
+        host?.undoAutoRank?.(this.folder);
+        break;
+      case 'makeBest':
+        host?.makeBest?.(this.folder, m.name);
         break;
       case 'tileSize':
         await context.globalState.update('vsphoto.tileSize', m.size);

@@ -365,3 +365,61 @@ body {
   font-size: 11px;
   cursor: pointer;
 }
+
+/* ---- culling: rating bar under the photo ---- */
+.ratebar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 6px 16px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}
+.ratebar .star {
+  width: 30px;
+  height: 30px;
+  font-size: 20px;
+}
+.ratebar label.check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.ratebar kbd {
+  font-family: inherit;
+  font-size: 11px;
+  opacity: 0.6;
+}
+.cull-progress {
+  color: var(--muted);
+}
+.flag-dot {
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  width: 11px;
+  height: 11px;
+  border-radius: 6px;
+  display: none;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
+}
+.flag-dot.pick {
+  display: block;
+  background: var(--pick);
+}
+.flag-dot.reject {
+  display: block;
+  background: var(--reject);
+}
+.strip-item.is-reject .strip-img {
+  opacity: 0.35;
+  filter: grayscale(0.6);
+}
+.rank-why {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}

@@ -52,6 +52,8 @@ interface IndexData {
   exif: Record<string, ExifEntry>;
   packSize: number;
   garbage: number;
+  /** Other per-folder data kept with the index (e.g. the folder's ratings). */
+  extra?: Record<string, unknown>;
 }
 
 export interface Thumb {
@@ -122,6 +124,17 @@ export class FolderCache {
         delete this.data.exif[n];
       }
     }
+    this.scheduleSave();
+  }
+
+  // ---- extra data ----
+
+  getExtra<T>(key: string): T | undefined {
+    return this.data.extra?.[key] as T | undefined;
+  }
+
+  setExtra(key: string, value: unknown): void {
+    this.data.extra = { ...(this.data.extra ?? {}), [key]: value };
     this.scheduleSave();
   }
 

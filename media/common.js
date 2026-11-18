@@ -36,6 +36,9 @@
     right: 'M6 3l5 5-5 5',
     photo: 'M2 12l4-5 3 3.5 2-2 3 3.5z',
     undo: 'M5 6h5a3 3 0 0 1 0 6H7M7 3.5L4.5 6 7 8.5',
+    check: 'M3 8.5l3 3 7-7',
+    x: 'M4 4l8 8M12 4l-8 8',
+    spark: 'M8 0l1.8 6.2L16 8l-6.2 1.8L8 16l-1.8-6.2L0 8l6.2-1.8z',
     redo: 'M11 6H6a3 3 0 0 0 0 6h3M9 3.5L11.5 6 9 8.5',
   };
   function icon(name, size) {
@@ -192,10 +195,92 @@
     return el;
   }
 
+  /**
+   * Radar chart for "why this rank": axes [{label, value 0–100, avg?}]. The photo is a filled
+   * shape; with `withAvg`, the average of its similar shots is a dashed outline.
+   */
+  function radar(axes, withAvg) {
+    const NS = 'http://www.w3.org/2000/svg';
+    const el = (tag, attrs, text) => {
+      const n = document.createElementNS(NS, tag);
+      for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v));
+      if (text !== undefined) n.textContent = text;
+      return n;
+    };
+    const W = 300, H = 232, cx = 150, cy = 114, R = 64, n = axes.length;
+    const pt = (i, v, r = R) => {
+      const a = -Math.PI / 2 + (i * 2 * Math.PI) / n;
+      return [cx + (r * v * Math.cos(a)) / 100, cy + (r * v * Math.sin(a)) / 100];
+    };
+    const poly = (vals) => vals.map((v, i) => pt(i, v).map((x) => x.toFixed(1)).join(',')).join(' ');
+    const svg = el('svg', { viewBox: `-48 0 ${W + 96} ${H}`, class: 'radar', role: 'img', // side room for labels
+      'aria-label': 'Why this rank, out of 100: ' + axes.map((a) => `${a.label} ${a.value}`).join(', ') + (withAvg ? '. Dashed: average of its similar shots.' : '') });
+    for (const r of [25, 50, 75, 100]) svg.append(el('polygon', { points: poly(axes.map(() => r)), class: 'radar-ring' }));
+    svg.append(el('path', { d: axes.map((_, i) => `M${cx} ${cy}L${pt(i, 100).join(' ')}`).join(''), class: 'radar-ring' }));
+    if (withAvg && axes.every((a) => a.avg !== undefined)) svg.append(el('polygon', { points: poly(axes.map((a) => a.avg)), class: 'radar-avg' }));
+    svg.append(el('polygon', { points: poly(axes.map((a) => a.value)), class: 'radar-shape' }));
+    axes.forEach((a, i) => {
+      const [x, y] = pt(i, a.value);
+      const dot = el('circle', { cx: x.toFixed(1), cy: y.toFixed(1), r: 4, class: 'radar-dot' });
+      dot.append(el('title', {}, `${a.label}: ${a.value} of 100` + (a.avg !== undefined ? ` (similar shots average ${Math.round(a.avg)})` : '')));
+      svg.append(dot);
+      const [lx, ly] = pt(i, 114);
+      const anchor = Math.abs(lx - cx) < 5 ? 'middle' : lx > cx ? 'start' : 'end';
+      const dy = ly < cy - 5 ? -6 : ly > cy + 5 ? 12 : 4;
+      const t = el('text', { x: lx.toFixed(1), y: (ly + dy).toFixed(1), 'text-anchor': anchor, class: 'radar-label' }, a.label + ' ');
+      t.append(el('tspan', { class: 'radar-value' }, String(a.value)));
+      svg.append(t);
+    });
+    const legend = h('div', { class: 'radar-legend' },
+      h('span', {}, h('span', { class: 'sw-shape', 'aria-hidden': 'true' }), 'This photo'),
+      withAvg ? h('span', {}, h('span', { class: 'sw-avg', 'aria-hidden': 'true' }), 'Average of its similar shots') : null);
+    return h('div', { class: 'radar-wrap' }, svg, legend);
+  }
+
+  const RANK_AXES = [
+    ['focus', 'Focus'],
+    ['exposure', 'Exposure'],
+    ['similar', 'vs. similar'],
+    ['eyes', 'Eyes open'],
+    ['looking', 'Looking'],
+    ['smile', 'Smiling'],
+    ['framing', 'Framing'],
+  ];
+
+  /** Radar (or a list when fewer than 3 criteria) plus the one-line reason of an Auto-Rank. */
+  function rankExplanation(auto) {
+    const axes = RANK_AXES.filter(([k]) => auto.scores && auto.scores[k] !== undefined).map(([k, label]) => ({
+      label,
+      value: Math.round(auto.scores[k]),
+      avg: auto.groupAvg ? auto.groupAvg[k] : undefined,
+    }));
+    return h(
+      'div',
+      { class: 'rank-why' },
+      h('div', { class: 'rating-title' }, 'WHY THIS RANK'),
+      axes.length >= 3 ? radar(axes, !!auto.groupAvg) : detailsList(axes.map((a) => ({ label: a.label, value: String(a.value) }))),
+      auto.reason ? h('p', { class: 'reason' }, auto.reason) : null,
+    );
+  }
+
   /** Marks an element as a photo for the right-click menu (Move to…, Reveal in OS). */
   function photoContext(name) {
     return JSON.stringify({ webviewSection: 'photo', photo: name, preventDefaultContextMenuItems: true });
   }
 
-  window.vsphoto = { vscode, h, icon, crumbs, detailsList, picture, blobUrl, makeThumbnail, section, photoContext };
+  /**
+   * Should a key press go to the focused control instead of the page's shortcuts? Text fields get
+   * every key; sliders and dropdowns get arrows/Home/End; checkboxes and buttons get none.
+   */
+  function keyBelongsToControl(e) {
+    const t = e.target;
+    if (!t || !t.tagName) return false;
+    const tag = t.tagName;
+    const textual = tag === 'TEXTAREA' || (tag === 'INPUT' && !['checkbox', 'radio', 'range', 'button', 'submit'].includes(t.type));
+    if (textual || t.isContentEditable) return true;
+    const navKey = /^(Arrow|Home|End|Page)/.test(e.key);
+    return navKey && (tag === 'SELECT' || (tag === 'INPUT' && t.type === 'range'));
+  }
+
+  window.vsphoto = { vscode, h, icon, crumbs, detailsList, picture, blobUrl, makeThumbnail, section, photoContext, radar, rankExplanation, keyBelongsToControl };
 })();

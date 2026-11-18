@@ -8,6 +8,7 @@ import { pathToFileURL } from 'url';
 import { Worker } from 'worker_threads';
 import * as os from 'os';
 import { downscale, orient, Rgba, trimBars } from './image';
+import { Analysis, analyzePixels } from './analyze';
 
 interface Decoder {
   init(module: WebAssembly.Module): Promise<unknown> | void;
@@ -108,6 +109,15 @@ export async function makeThumbHere(jpeg: Uint8Array, opts: ThumbOptions): Promi
   return { data: Buffer.from(webp), w: img.width, h: img.height, sourceWidth, sourceHeight };
 }
 
+/** Decodes a JPEG and measures it for Auto-Rank at ~1024 px. In this thread. */
+export async function analyzeHere(jpeg: Uint8Array): Promise<Analysis & { sourceWidth: number; sourceHeight: number }> {
+  const { decode } = await codecs();
+  const ab = jpeg.buffer.slice(jpeg.byteOffset, jpeg.byteOffset + jpeg.byteLength) as ArrayBuffer;
+  const img = await decode.default(ab, { preserveOrientation: false });
+  const a = analyzePixels(downscale(img, 1024));
+  return { ...a, sourceWidth: img.width, sourceHeight: img.height };
+}
+
 // ---- worker pool ------------------------------------------------------------------------
 
 /**
@@ -116,8 +126,8 @@ export async function makeThumbHere(jpeg: Uint8Array, opts: ThumbOptions): Promi
  */
 class Pool {
   private readonly workers: Array<{ w: Worker; busy: boolean }> = [];
-  private readonly queue: Array<{ jpeg: Uint8Array; opts: ThumbOptions; resolve: (t: MadeThumb) => void; reject: (e: unknown) => void }> = [];
-  private readonly pending = new Map<number, { resolve: (t: MadeThumb) => void; reject: (e: unknown) => void; worker: { w: Worker; busy: boolean } }>();
+  private readonly queue: Array<{ kind: 'thumb' | 'analyze'; jpeg: Uint8Array; opts?: ThumbOptions; resolve: (t: any) => void; reject: (e: unknown) => void }> = [];
+  private readonly pending = new Map<number, { kind: 'thumb' | 'analyze'; resolve: (t: any) => void; reject: (e: unknown) => void; worker: { w: Worker; busy: boolean } }>();
   private nextId = 1;
 
   constructor(size: number) {
@@ -125,13 +135,15 @@ class Pool {
     for (let i = 0; i < size; i++) {
       const w = new Worker(file);
       const slot = { w, busy: false };
-      w.on('message', (m: { id: number; ok: boolean; thumb?: MadeThumb & { data: Uint8Array }; error?: string }) => {
+      w.on('message', (m: { id: number; ok: boolean; thumb?: MadeThumb & { data: Uint8Array }; analysis?: unknown; error?: string }) => {
         const job = this.pending.get(m.id);
         this.pending.delete(m.id);
         slot.busy = false;
         w.unref();
         if (job) {
-          if (m.ok && m.thumb) {
+          if (m.ok && m.analysis) {
+            job.resolve(m.analysis);
+          } else if (m.ok && m.thumb) {
             job.resolve({ ...m.thumb, data: Buffer.from(m.thumb.data.buffer, m.thumb.data.byteOffset, m.thumb.data.byteLength) });
           } else {
             job.reject(new Error(m.error ?? 'decode failed'));
@@ -166,7 +178,14 @@ class Pool {
 
   run(jpeg: Uint8Array, opts: ThumbOptions): Promise<MadeThumb> {
     return new Promise((resolve, reject) => {
-      this.queue.push({ jpeg, opts, resolve, reject });
+      this.queue.push({ kind: 'thumb', jpeg, opts, resolve, reject });
+      this.drain();
+    });
+  }
+
+  analyze(jpeg: Uint8Array): Promise<Analysis & { sourceWidth: number; sourceHeight: number }> {
+    return new Promise((resolve, reject) => {
+      this.queue.push({ kind: 'analyze', jpeg, resolve, reject });
       this.drain();
     });
   }
@@ -180,10 +199,10 @@ class Pool {
       const id = this.nextId++;
       slot.busy = true;
       slot.w.ref();
-      this.pending.set(id, { resolve: job.resolve, reject: job.reject, worker: slot });
+      this.pending.set(id, { kind: job.kind, resolve: job.resolve, reject: job.reject, worker: slot });
       // Copy into a fresh buffer we can hand over without copying again.
       const bytes = new Uint8Array(job.jpeg);
-      slot.w.postMessage({ id, jpeg: bytes, opts: job.opts }, [bytes.buffer]);
+      slot.w.postMessage({ id, kind: job.kind, jpeg: bytes, opts: job.opts }, [bytes.buffer]);
     }
   }
 
@@ -228,6 +247,27 @@ export async function makeThumb(jpeg: Uint8Array, opts: ThumbOptions): Promise<M
     }
   }
   return makeThumbHere(jpeg, opts);
+}
+
+/** Auto-Rank measurements of a JPEG, on a worker thread when possible. */
+export async function analyzeJpeg(jpeg: Uint8Array): Promise<Analysis & { sourceWidth: number; sourceHeight: number }> {
+  if (!pool && !poolFailed && fs.existsSync(path.join(__dirname, 'codecWorker.js'))) {
+    try {
+      pool = new Pool(codecThreads());
+    } catch {
+      poolFailed = true;
+    }
+  }
+  if (pool) {
+    try {
+      return await pool.analyze(jpeg);
+    } catch (err) {
+      if (/decod/i.test(String(err))) {
+        throw err;
+      }
+    }
+  }
+  return analyzeHere(jpeg);
 }
 
 export function disposeCodecs(): void {

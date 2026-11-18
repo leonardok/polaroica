@@ -29,7 +29,9 @@ export class LibraryTree implements vscode.TreeDataProvider<TreeNode>, vscode.Tr
   readonly dragMimeTypes = ['text/uri-list'];
 
   /** What we know about a folder's contents: photo count and whether it has sub-folders. */
-  private readonly info = new Map<string, { photos: number; subfolders: number }>();
+  private readonly info = new Map<string, { photos: number; subfolders: number; picks?: number }>();
+  /** Set by the extension: pick counts per album (from the sidecars). */
+  picksIn?: (folder: string) => Promise<number>;
   private readonly offline = new Set<string>();
   private readonly nodes = new Map<string, FolderNode>();
 
@@ -49,6 +51,16 @@ export class LibraryTree implements vscode.TreeDataProvider<TreeNode>, vscode.Tr
       const node = this.nodes.get(folder.fsPath);
       this.changed.fire(node ? node.parent : undefined);
     });
+  }
+
+  /** An album's picks changed: redraw its row. */
+  async picksChanged(folder: string): Promise<void> {
+    const i = this.info.get(folder);
+    const node = this.nodes.get(folder);
+    if (i && node && this.picksIn) {
+      i.picks = await this.picksIn(folder).catch(() => 0);
+      this.changed.fire(node);
+    }
   }
 
   refresh(): void {
@@ -96,7 +108,7 @@ export class LibraryTree implements vscode.TreeDataProvider<TreeNode>, vscode.Tr
     item.contextValue = 'folder';
     item.tooltip = node.uri.fsPath;
     if (showCounts && info?.photos) {
-      item.description = info.photos.toLocaleString();
+      item.description = info.photos.toLocaleString() + (info.picks ? ` · ${info.picks} ✓` : '');
     }
     item.command = { command: 'vsphoto.openFolder', title: 'Open', arguments: [node.uri] };
     return item;
@@ -155,7 +167,8 @@ export class LibraryTree implements vscode.TreeDataProvider<TreeNode>, vscode.Tr
     await mapLimit(missing, 4, async (c) => {
       try {
         const listing = await this.store.listing(c.uri);
-        this.info.set(c.uri.fsPath, { photos: listing.photos.length, subfolders: listing.folders.length });
+        const picks = this.picksIn ? await this.picksIn(c.uri.fsPath).catch(() => 0) : 0;
+        this.info.set(c.uri.fsPath, { photos: listing.photos.length, subfolders: listing.folders.length, picks });
         this.changed.fire(c);
       } catch {
         /* unreadable folder: keep it expandable, no count */

@@ -21,6 +21,20 @@ can already reach.
   Settings / Paste. Edits are **non-destructive**: they are saved to
   `.sidecar/<photo name>.xmp` in the photo's folder (hidden from the library) and the photo file is
   never changed. Edited photos show an orange dot in the grid and filmstrip.
+- **Culling**: flag photos **Pick** (`P`) or **Reject** (`X`), clear with `U`, and give **0–5 stars**
+  (`0`–`5`), in the grid (on the selection) or in the photo tab's rating bar (with optional
+  **Auto-advance** to the next photo). The grid's filter bar shows All / Picks / Unflagged /
+  Rejects with counts, can **hide rejects** and filter by stars; rejects are washed out. Albums in
+  the sidebar show their pick count. Ratings live in the same `.sidecar/<photo>.xmp`
+  (`xmp:Rating`); nothing is moved or deleted.
+- **Auto-Rank** an album (right-click it in the sidebar, the grid's **Auto-Rank…** button, or the
+  Command Palette): measures **focus** (sharpest part of each photo, relative to the album),
+  **washed-out highlights** (large blown-out areas) and **similar shots** (bursts: taken within
+  `vsphoto.autoRank.burstSeconds` and alike by a look-alike hash), then sets stars, **picks the
+  best of each group of similar shots**, and stacks the groups in the grid. Photos you rated yourself
+  are left alone; nothing is rejected unless you ask. Ratings it set carry a ✦ until you change them.
+  The **AUTO-RANK** section (grid and photo tab) explains each rank with a radar chart and lets you
+  choose another shot as a group's best. **Undo Auto-Rank** restores the previous ratings.
 - **Right-click** a photo (grid or photo tab) for **Move to…** and **Reveal in OS**.
 - **Move**: *Move to…* from the grid, a photo tab, or a folder's context menu walks your libraries
   folder by folder (with recent destinations and *New folder…*). Folders can also be dragged onto
@@ -92,6 +106,7 @@ display as a labelled placeholder for now.
 | `vsphoto.thumbnailSize` | `256` | Thumbnail long edge: 192, 256 or 320 px (≈ 4 / 6 / 9 KB each). |
 | `vsphoto.cacheSizeMB` | `1024` | Disk space for the local cache. |
 | `vsphoto.backgroundThumbnails` | `true` | Build thumbnails for the whole library in the background. |
+| `vsphoto.autoRank.burstSeconds` | `2` | Auto-Rank: max seconds between frames of one burst. |
 
 ## Develop
 
@@ -113,6 +128,7 @@ npx @vscode/vsce package
 ## Known limitations / next steps
 
 - Grid thumbnails don't show edits yet, and there is no Export (a JPEG copy with the edits applied) yet.
+- Auto-Rank's people signals (eyes open, looking at the camera, smiling) and composition are designed (canvas page v1.2.0) but not built yet.
 - Dragging photos from the grid onto the tree uses the standard `text/uri-list` drag data; if your
   editor doesn't accept drops from webviews, use *Move to…*.
 - File-change watching may not fire for every SMB server; use **Refresh** in the view title or

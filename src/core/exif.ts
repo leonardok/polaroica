@@ -12,6 +12,7 @@ export interface ExifInfo {
   model?: string;
   lens?: string;
   dateTaken?: string; // "YYYY:MM:DD HH:MM:SS" as stored
+  subSec?: string; // fraction of a second, e.g. "34" (bursts take several frames per second)
   exposureTime?: number; // seconds
   fNumber?: number;
   iso?: number;
@@ -44,6 +45,7 @@ const TAG = {
   fNumber: 0x829d,
   iso: 0x8827,
   dateTimeOriginal: 0x9003,
+  subSecOriginal: 0x9291,
   focalLength: 0x920a,
   pixelX: 0xa002,
   pixelY: 0xa003,
@@ -214,6 +216,7 @@ export function readExif(buf: Uint8Array): ExifInfo | undefined {
     info.model ??= str(t.get(TAG.model));
     info.lens ??= str(t.get(TAG.lensModel));
     info.dateTaken ??= str(t.get(TAG.dateTimeOriginal));
+    info.subSec ??= str(t.get(TAG.subSecOriginal));
     info.exposureTime ??= num(t.get(TAG.exposureTime));
     info.fNumber ??= num(t.get(TAG.fNumber));
     info.iso ??= num(t.get(TAG.iso));
@@ -430,6 +433,17 @@ export function isBrowserJpeg(bytes: Uint8Array): boolean {
     off += 2 + ((bytes[off + 2] << 8) | bytes[off + 3]);
   }
   return true; // could not tell from the start; let the decoder try
+}
+
+/** Capture time in ms (local time read as UTC: only differences matter), with sub-seconds. */
+export function captureTime(info: ExifInfo | undefined): number | undefined {
+  const m = info?.dateTaken && /^(\d{4}):(\d{2}):(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/.exec(info.dateTaken);
+  if (!m) {
+    return undefined;
+  }
+  const ms = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]);
+  const frac = info?.subSec && /^\d+/.test(info.subSec) ? Number('0.' + /^\d+/.exec(info.subSec)![0]) : 0;
+  return ms + Math.round(frac * 1000);
 }
 
 export function formatExposure(seconds: number): string {

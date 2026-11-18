@@ -23,7 +23,8 @@ type FromViewer =
   | { type: 'needBytes'; name: string }
   | { type: 'saveEdits'; name: string; edits: unknown }
   | { type: 'copyEdits'; edits: unknown }
-  | { type: 'pasteEdits' };
+  | { type: 'pasteEdits' }
+  | { type: 'rate'; name: string; rating?: number; flag?: 'pick' | 'reject' | null };
 
 const STRIP_RADIUS = 6;
 
@@ -173,10 +174,17 @@ class PhotoViewer {
     }
     const view = toView(webview, photo);
     const raw = isRaw(photo.name);
-    const [edits, editedNames] = await Promise.all([
+    const [edits, cullMap] = await Promise.all([
       this.owner.edits.load(photo.uri),
-      this.owner.edits.editedIn(this.folder.fsPath),
+      this.owner.edits.cullingIn(this.folder.fsPath),
     ]);
+    let picks = 0;
+    let rejects = 0;
+    for (const p of this.photos) {
+      const f = cullMap.get(p.name)?.flag;
+      if (f === 'pick') picks++;
+      else if (f === 'reject') rejects++;
+    }
     if (this.current !== photo) {
       return;
     }
@@ -198,10 +206,13 @@ class PhotoViewer {
         name: p.name,
         ext: toView(webview, p).ext,
         thumb: cached.get(p.name)?.data,
-        edited: editedNames.has(p.name),
+        edited: !!cullMap.get(p.name)?.edited,
+        flag: cullMap.get(p.name)?.flag,
       })),
       preload: neighbours,
       edits,
+      cull: cullMap.get(photo.name) ?? null,
+      progress: { picks, rejects, toGo: this.photos.length - picks - rejects },
       canPaste: !!this.owner.edits.clipboard,
     });
 
@@ -275,6 +286,18 @@ class PhotoViewer {
           } catch (err) {
             void vscode.window.showErrorMessage(`Could not save edits for ${photo.name}: ${err instanceof Error ? err.message : String(err)}`);
           }
+        }
+        break;
+      }
+      case 'rate': {
+        const photo = this.photos.find((p) => p.name === m.name);
+        if (photo) {
+          const change: { rating?: number; flag?: 'pick' | 'reject' | null } = {};
+          if (m.rating !== undefined) change.rating = m.rating;
+          if (m.flag !== undefined) change.flag = m.flag;
+          await this.owner.edits.rate([photo.uri], change).catch((err) => {
+            void vscode.window.showErrorMessage(`Could not save the rating: ${err instanceof Error ? err.message : String(err)}`);
+          });
         }
         break;
       }

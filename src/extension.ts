@@ -10,6 +10,7 @@ import { PhotoStore } from './photoStore';
 import { ThumbService } from './thumbs';
 import { EditStore } from './edits';
 import { BackgroundThumbnails } from './background';
+import { AutoRanker } from './autorank';
 import { FolderNode, LibraryNode, LibraryTree, TreeNode } from './tree';
 import { PhotoViewers } from './viewer';
 
@@ -23,11 +24,17 @@ export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel('Photo Library');
   context.subscriptions.push(output);
   thumbs.log = (line) => output.appendLine(`[${new Date().toLocaleTimeString()}] ${line}`);
-  const edits = new EditStore();
+  const edits = new EditStore(cache);
   const mover = new Mover(context, libraries, store, edits);
   const grids = new GridPanels(context, libraries, store, mover, thumbs, edits);
   const viewers = new PhotoViewers(context, libraries, store, mover, thumbs, edits);
-  grids.setHost({ openPhoto: (folder, name, sort) => viewers.open(folder, name, sort) });
+  const ranker = new AutoRanker(context, store, edits, (folder, summary) => grids.autoRankDone(folder, summary));
+  grids.setHost({
+    openPhoto: (folder, name, sort) => viewers.open(folder, name, sort),
+    autoRank: (folder) => void ranker.run(folder),
+    undoAutoRank: (folder) => void ranker.undoRun(folder),
+    makeBest: (folder, name) => void ranker.makeBest(folder, name),
+  });
   const background = new BackgroundThumbnails(libraries, store, thumbs, () => capMb() * 1024 * 1024, (photo, t) =>
     grids.offer(photo, t),
   );
@@ -36,6 +43,14 @@ export function activate(context: vscode.ExtensionContext): void {
   const tree = new LibraryTree(libraries, store, async (files, target) => {
     await mover.move(files, target);
   });
+  tree.picksIn = async (folder) => {
+    let n = 0;
+    for (const c of (await edits.cullingIn(folder)).values()) {
+      if (c.flag === 'pick') n++;
+    }
+    return n;
+  };
+  context.subscriptions.push(edits.onDidChange((photo) => void tree.picksChanged(path.dirname(photo.fsPath))));
   const view = vscode.window.createTreeView('vsphoto.libraries', {
     treeDataProvider: tree,
     dragAndDropController: tree,
@@ -122,6 +137,15 @@ export function activate(context: vscode.ExtensionContext): void {
         await cache.clear();
         store.invalidate();
         background.schedule(3000);
+      }
+    }),
+    vscode.commands.registerCommand('vsphoto.autoRank', async (arg?: unknown) => {
+      const uri = uriOf(arg);
+      if (uri) {
+        grids.open(uri);
+        await ranker.run(uri);
+      } else {
+        void vscode.window.showInformationMessage('Right-click an album in Photo Libraries, or use the Auto-Rank button in a grid.');
       }
     }),
     vscode.commands.registerCommand('vsphoto.buildThumbnails', () => background.start()),

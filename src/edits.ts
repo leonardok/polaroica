@@ -1,63 +1,176 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { defaultEdits, Edits, fromXmp, isDefault, SIDECAR_DIR, sidecarName, toXmp } from './core/xmp';
+import { CacheManager } from './core/cache';
+import {
+  AutoRank,
+  Edits,
+  emptySidecar,
+  Flag,
+  isDefault,
+  isEmptySidecar,
+  readSidecar,
+  Sidecar,
+  SIDECAR_DIR,
+  sidecarName,
+  toXmp,
+} from './core/xmp';
+import { mapLimit } from './photoStore';
+
+/** What the grid and filmstrip need to know about a photo's sidecar. */
+export interface CullInfo {
+  rating: number;
+  flag?: Flag;
+  auto?: AutoRank;
+  edited: boolean;
+}
+
+export interface RatingChange {
+  rating?: number;
+  /** null clears the flag. */
+  flag?: Flag | null;
+  /** Set by Auto-Rank; any change without it is "yours" and clears the Auto-Rank mark. */
+  auto?: AutoRank | null;
+}
+
+const CULL_KEY = 'culling-v1';
 
 /**
- * Photo edits, kept next to the photos: `<folder>/.sidecar/<photo>.xmp`. The photo file itself is
- * never written. Saving default settings removes the sidecar (and the folder once it's empty).
+ * Sidecars next to the photos: `<folder>/.sidecar/<photo>.xmp`, holding edits, star rating,
+ * pick/reject flag and Auto-Rank details. The photo file itself is never written. A sidecar
+ * left with nothing in it is removed (and the folder once it's empty).
+ *
+ * Reading every sidecar of a big folder over a network share is slow, so each folder's ratings
+ * are also kept in the local index, keyed by the `.sidecar` folder's modified time (every write
+ * here replaces a file, which updates it).
  */
 export class EditStore {
-  /** Folder -> names of photos with a sidecar (one readdir per folder). */
-  private readonly edited = new Map<string, Promise<Set<string>>>();
+  private readonly folders = new Map<string, Promise<Map<string, CullInfo>>>();
   private readonly changed = new vscode.EventEmitter<vscode.Uri>();
-  /** Fires with the photo whose edits changed. */
+  /** Fires with a photo whose sidecar changed. */
   readonly onDidChange = this.changed.event;
   /** Settings copied with "Copy Settings", shared by all photo tabs. */
   clipboard: Edits | undefined;
+
+  constructor(private readonly cache?: CacheManager) {}
 
   sidecarPath(photo: vscode.Uri): string {
     return path.join(path.dirname(photo.fsPath), SIDECAR_DIR, sidecarName(path.basename(photo.fsPath)));
   }
 
-  async load(photo: vscode.Uri): Promise<Edits | undefined> {
+  async loadSidecar(photo: vscode.Uri): Promise<Sidecar | undefined> {
     try {
-      return fromXmp(await fs.promises.readFile(this.sidecarPath(photo), 'utf8'));
+      return readSidecar(await fs.promises.readFile(this.sidecarPath(photo), 'utf8'));
     } catch {
       return undefined;
     }
   }
 
+  /** The photo's edits, if it has a sidecar. */
+  async load(photo: vscode.Uri): Promise<Edits | undefined> {
+    return (await this.loadSidecar(photo))?.edits;
+  }
+
+  /** Saves edits, keeping the rating and flag. */
   async save(photo: vscode.Uri, edits: Edits): Promise<void> {
+    const sc = (await this.loadSidecar(photo)) ?? emptySidecar();
+    sc.edits = edits;
+    await this.write(photo, sc);
+  }
+
+  /** Sets rating / flag on several photos (all in one folder or not). */
+  async rate(photos: vscode.Uri[], change: RatingChange): Promise<void> {
+    await mapLimit(photos, 6, async (photo) => {
+      const sc = (await this.loadSidecar(photo)) ?? emptySidecar();
+      if (change.rating !== undefined) {
+        sc.rating = Math.max(0, Math.min(5, Math.round(change.rating)));
+      }
+      if (change.flag !== undefined) {
+        sc.flag = change.flag ?? undefined;
+      }
+      if (change.auto !== undefined) {
+        sc.auto = change.auto ?? undefined;
+      } else if (change.rating !== undefined || change.flag !== undefined) {
+        sc.auto = undefined; // you rated it: no longer an Auto-Rank result
+      }
+      await this.write(photo, sc);
+    });
+  }
+
+  /** Writes a whole sidecar (Auto-Rank undo restores earlier ones this way). */
+  async write(photo: vscode.Uri, sc: Sidecar): Promise<void> {
     const file = this.sidecarPath(photo);
     const dir = path.dirname(file);
-    const names = await this.editedIn(path.dirname(photo.fsPath));
+    const folder = path.dirname(photo.fsPath);
     const name = path.basename(photo.fsPath);
-    if (isDefault(edits)) {
+    if (isEmptySidecar(sc)) {
       await fs.promises.rm(file, { force: true });
-      names.delete(name);
       await fs.promises.rmdir(dir).catch(() => undefined); // only succeeds when empty
     } else {
       await fs.promises.mkdir(dir, { recursive: true });
       const tmp = file + '.tmp';
-      await fs.promises.writeFile(tmp, toXmp(edits), 'utf8');
+      await fs.promises.writeFile(tmp, toXmp(sc), 'utf8');
       await fs.promises.rename(tmp, file);
-      names.add(name);
     }
+    const map = await this.cullingIn(folder);
+    if (isEmptySidecar(sc)) {
+      map.delete(name);
+    } else {
+      map.set(name, { rating: sc.rating, flag: sc.flag, auto: sc.auto, edited: !isDefault(sc.edits) });
+    }
+    await this.remember(folder, map);
     this.changed.fire(photo);
   }
 
-  /** Names of photos in a folder that have edits. */
-  editedIn(folder: string): Promise<Set<string>> {
-    let p = this.edited.get(folder);
+  /** Ratings, flags and edit marks of every photo in a folder that has a sidecar. */
+  cullingIn(folder: string): Promise<Map<string, CullInfo>> {
+    let p = this.folders.get(folder);
     if (!p) {
-      p = fs.promises
-        .readdir(path.join(folder, SIDECAR_DIR))
-        .then((files) => new Set(files.filter((f) => f.endsWith('.xmp')).map((f) => f.slice(0, -4))))
-        .catch(() => new Set<string>());
-      this.edited.set(folder, p);
+      p = this.read(folder);
+      this.folders.set(folder, p);
+      p.catch(() => this.folders.delete(folder));
     }
     return p;
+  }
+
+  /** Names of photos in a folder that have edits. */
+  async editedIn(folder: string): Promise<Set<string>> {
+    const map = await this.cullingIn(folder);
+    return new Set([...map].filter(([, c]) => c.edited).map(([n]) => n));
+  }
+
+  private async read(folder: string): Promise<Map<string, CullInfo>> {
+    const dir = path.join(folder, SIDECAR_DIR);
+    const st = await fs.promises.stat(dir).catch(() => undefined);
+    if (!st) {
+      return new Map();
+    }
+    const fc = this.cache ? await this.cache.folder(folder) : undefined;
+    const saved = fc?.getExtra<{ mtime: number; entries: Array<[string, CullInfo]> }>(CULL_KEY);
+    if (saved && saved.mtime === Math.round(st.mtimeMs)) {
+      return new Map(saved.entries);
+    }
+    const files = (await fs.promises.readdir(dir)).filter((f) => f.endsWith('.xmp'));
+    const map = new Map<string, CullInfo>();
+    await mapLimit(files, 8, async (f) => {
+      try {
+        const sc = readSidecar(await fs.promises.readFile(path.join(dir, f), 'utf8'));
+        map.set(f.slice(0, -4), { rating: sc.rating, flag: sc.flag, auto: sc.auto, edited: !isDefault(sc.edits) });
+      } catch {
+        /* unreadable sidecar: skip */
+      }
+    });
+    await this.remember(folder, map);
+    return map;
+  }
+
+  private async remember(folder: string, map: Map<string, CullInfo>): Promise<void> {
+    if (!this.cache) {
+      return;
+    }
+    const st = await fs.promises.stat(path.join(folder, SIDECAR_DIR)).catch(() => undefined);
+    const fc = await this.cache.folder(folder);
+    fc.setExtra(CULL_KEY, { mtime: st ? Math.round(st.mtimeMs) : 0, entries: [...map] });
   }
 
   /** After a photo moved: its sidecar goes along (renamed if the photo was). */
@@ -75,20 +188,16 @@ export class EditStore {
       await fs.promises.rm(src, { force: true });
     }
     await fs.promises.rmdir(path.dirname(src)).catch(() => undefined);
-    this.edited.delete(path.dirname(from.fsPath));
-    this.edited.delete(path.dirname(to.fsPath));
+    this.forget(path.dirname(from.fsPath));
+    this.forget(path.dirname(to.fsPath));
   }
 
   forget(folder?: string): void {
     if (folder) {
-      this.edited.delete(folder);
+      this.folders.delete(folder);
     } else {
-      this.edited.clear();
+      this.folders.clear();
     }
-  }
-
-  defaults(): Edits {
-    return defaultEdits();
   }
 
   dispose(): void {

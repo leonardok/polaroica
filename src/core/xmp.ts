@@ -117,8 +117,51 @@ const CURVE_TAGS: Record<keyof Curves, string> = {
 
 const signed = (n: number, digits = 0) => (n > 0 ? '+' : '') + n.toFixed(digits);
 
-export function toXmp(e: Edits): string {
+// ---- culling ----------------------------------------------------------------------------
+
+export type Flag = 'pick' | 'reject';
+
+/** Scores 0–100 behind an Auto-Rank rating, plus how the photo did in its group of similar shots. */
+export interface AutoRank {
+  scores: Record<string, number>; // e.g. { focus: 86, exposure: 96, similar: 100 }
+  groupAvg?: Record<string, number>; // same keys: average of its similar shots
+  group?: { id: string; size: number; best: boolean };
+  notes?: string[]; // "blurry", "washed out"
+  reason?: string; // one line for people
+  at: string; // ISO time of the run
+}
+
+/** Everything the sidecar holds for one photo. */
+export interface Sidecar {
+  edits: Edits;
+  rating: number; // 0–5 stars
+  flag?: Flag;
+  /** Set when the rating/flag came from Auto-Rank (cleared when you rate yourself). */
+  auto?: AutoRank;
+}
+
+export function emptySidecar(): Sidecar {
+  return { edits: defaultEdits(), rating: 0 };
+}
+
+export function isEmptySidecar(s: Sidecar): boolean {
+  return isDefault(s.edits) && !s.rating && !s.flag && !s.auto;
+}
+
+const escapeAttr = (t: string) => t.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const unescapeAttr = (t: string) => t.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+
+export function toXmp(input: Edits | Sidecar): string {
+  const sc: Sidecar = 'edits' in input ? input : { ...emptySidecar(), edits: input };
+  const e = sc.edits;
   const attrs = SLIDERS.map((k) => `   crs:${SLIDER_TAGS[k]}="${signed(e[k], k === 'exposure' ? 2 : 0)}"`).join('\n');
+  const culling = [
+    `   xmp:Rating="${sc.rating}"`,
+    sc.flag ? `   vsphoto:Flag="${sc.flag}"` : '',
+    sc.auto ? `   vsphoto:AutoRank="${escapeAttr(JSON.stringify(sc.auto))}"` : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
   const curves = (['rgb', 'r', 'g', 'b'] as const)
     .map(
       (k) =>
@@ -131,10 +174,12 @@ export function toXmp(e: Edits): string {
 <x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="vsphoto">
  <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
   <rdf:Description rdf:about=""
+   xmlns:xmp="http://ns.adobe.com/xap/1.0/"
    xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/"
    xmlns:vsphoto="https://github.com/leonardok/vsphoto/ns/1.0/"
    vsphoto:version="1"
    crs:HasSettings="True"
+${culling}
 ${attrs}>
 ${curves}
   </rdf:Description>
@@ -144,8 +189,13 @@ ${curves}
 `;
 }
 
-/** Reads the settings back (our own files; tolerant of attribute order and spacing). */
+/** Edits only (kept for callers that don't care about culling). */
 export function fromXmp(text: string): Edits {
+  return readSidecar(text).edits;
+}
+
+/** Reads a sidecar back (our own files; tolerant of attribute order and spacing). */
+export function readSidecar(text: string): Sidecar {
   const raw: Record<string, unknown> = {};
   for (const k of SLIDERS) {
     const m = new RegExp(`crs:${SLIDER_TAGS[k]}\\s*=\\s*"([^"]*)"`).exec(text);
@@ -161,7 +211,24 @@ export function fromXmp(text: string): Edits {
     }
   }
   raw.curves = curves;
-  return normalizeEdits(raw);
+  const sc: Sidecar = { edits: normalizeEdits(raw), rating: 0 };
+  const rating = /xmp:Rating\s*=\s*"(-?\d+)"/.exec(text);
+  if (rating) {
+    sc.rating = Math.max(0, Math.min(5, Number(rating[1])));
+  }
+  const flag = /vsphoto:Flag\s*=\s*"(pick|reject)"/.exec(text);
+  if (flag) {
+    sc.flag = flag[1] as Flag;
+  }
+  const auto = /vsphoto:AutoRank\s*=\s*"([^"]*)"/.exec(text);
+  if (auto) {
+    try {
+      sc.auto = JSON.parse(unescapeAttr(auto[1])) as AutoRank;
+    } catch {
+      /* ignore a damaged value */
+    }
+  }
+  return sc;
 }
 
 /** `<folder>/.sidecar/<name>.xmp` — the sidecar folder keeps them out of the way. */
