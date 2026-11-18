@@ -19,36 +19,46 @@ export function downscale(src: Rgba, maxSide: number): Rgba {
   }
   const dw = Math.max(1, Math.round(sw * scale));
   const dh = Math.max(1, Math.round(sh * scale));
-  const acc = new Float64Array(dw * dh * 4);
-  const weight = new Float64Array(dw * dh);
-  // Each source pixel adds to the destination pixel it falls in. Simple, fast, and close to a
-  // true box filter for the large ratios we use (6000 -> 256).
-  const xMap = new Int32Array(sw);
-  for (let x = 0; x < sw; x++) {
-    xMap[x] = Math.min(dw - 1, Math.floor((x * dw) / sw));
-  }
-  for (let y = 0; y < sh; y++) {
-    const dy = Math.min(dh - 1, Math.floor((y * dh) / sh));
-    const rowS = y * sw * 4;
-    const rowD = dy * dw;
-    for (let x = 0; x < sw; x++) {
-      const di = rowD + xMap[x];
-      const si = rowS + x * 4;
-      const ai = di * 4;
-      acc[ai] += s[si];
-      acc[ai + 1] += s[si + 1];
-      acc[ai + 2] += s[si + 2];
-      acc[ai + 3] += s[si + 3];
-      weight[di]++;
-    }
-  }
+  // Each source pixel adds to the destination pixel it falls in (a box filter, right for the
+  // large ratios we use, e.g. 6000 -> 256). Integer sums: a few times faster than floats.
+  const acc = new Uint32Array(dw * 4);
   const out = new Uint8ClampedArray(dw * dh * 4);
-  for (let i = 0; i < dw * dh; i++) {
-    const w = weight[i] || 1;
-    out[i * 4] = acc[i * 4] / w;
-    out[i * 4 + 1] = acc[i * 4 + 1] / w;
-    out[i * 4 + 2] = acc[i * 4 + 2] / w;
-    out[i * 4 + 3] = acc[i * 4 + 3] / w;
+  // Shrinking by 8× or more: every other pixel in each direction is plenty (each output pixel
+  // still averages dozens of samples) and four times less work.
+  const step = 1 / scale >= 8 ? 2 : 1;
+  const xMap = new Uint32Array(sw);
+  const colCount = new Uint32Array(dw);
+  for (let x = 0; x < sw; x += step) {
+    const dx = Math.min(dw - 1, Math.floor((x * dw) / sw));
+    xMap[x] = dx * 4;
+    colCount[dx]++;
+  }
+  let y = 0;
+  for (let dy = 0; dy < dh; dy++) {
+    const yEnd = dy === dh - 1 ? sh : Math.min(sh, Math.floor(((dy + 1) * sh) / dh));
+    acc.fill(0);
+    let rows = 0;
+    for (; y < yEnd; y += step) {
+      rows++;
+      let si = y * sw * 4;
+      for (let x = 0; x < sw; x += step, si += 4 * step) {
+        const ai = xMap[x];
+        acc[ai] += s[si];
+        acc[ai + 1] += s[si + 1];
+        acc[ai + 2] += s[si + 2];
+        acc[ai + 3] += s[si + 3];
+      }
+    }
+    const o = dy * dw * 4;
+    for (let dx = 0; dx < dw; dx++) {
+      const n = colCount[dx] * rows || 1;
+      // (y may overshoot yEnd by one when stepping; the next row band starts there)
+      const ai = dx * 4;
+      out[o + ai] = acc[ai] / n;
+      out[o + ai + 1] = acc[ai + 1] / n;
+      out[o + ai + 2] = acc[ai + 2] / n;
+      out[o + ai + 3] = acc[ai + 3] / n;
+    }
   }
   return { data: out, width: dw, height: dh };
 }

@@ -4,6 +4,7 @@ import { Thumb } from './core/cache';
 import { Libraries } from './libraries';
 import { isReachable, Photo, PhotoStore } from './photoStore';
 import { Limiter, ThumbService } from './thumbs';
+import { codecThreads } from './core/codec';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -29,8 +30,9 @@ export class BackgroundThumbnails implements vscode.Disposable {
   private sharpMade = 0;
   private failed = 0;
   private cacheFull = false;
-  private readonly heads = new Limiter(2);
-  private readonly fulls = new Limiter(2);
+  private readonly heads = new Limiter(4);
+  // One full read in flight per decoding thread keeps every core busy.
+  private readonly fulls = new Limiter(codecThreads());
   private progress?: vscode.Progress<{ message?: string }>;
   private finishProgress?: () => void;
   private startTimer?: NodeJS.Timeout;
@@ -203,68 +205,81 @@ export class BackgroundThumbnails implements vscode.Disposable {
     return undefined;
   }
 
-  private async quickWorker(gen: number): Promise<void> {
-    for (let i = 0; ; i++) {
-      const p = await this.next(gen, i);
-      if (!p) {
-        return;
-      }
-      await this.waitTurn(gen);
-      if (!this.live(gen)) {
-        return;
-      }
-      if ((await this.thumbs.state(p)) === 'none') {
-        const t = await this.thumbs.quick(p, this.heads).catch(() => undefined);
-        if (t) {
-          this.quickMade++;
-          this.onMade(p, t);
+  /**
+   * Runs `lanes` copies of `task` over the photo list, each taking the next unclaimed photo, so
+   * several photos are read and decoded at once. `done` is called after each photo.
+   */
+  private async lanes(gen: number, lanes: number, task: (p: Photo) => Promise<void>, done: () => void): Promise<void> {
+    let next = 0;
+    const lane = async () => {
+      for (;;) {
+        const i = next++;
+        const p = await this.next(gen, i);
+        if (!p) {
+          return;
         }
+        await this.waitTurn(gen);
+        if (!this.live(gen)) {
+          return;
+        }
+        await task(p).catch(() => undefined);
+        done();
+        this.report();
       }
-      this.quickDone = i + 1;
-      this.report();
-    }
+    };
+    await Promise.all(Array.from({ length: lanes }, lane));
+  }
+
+  private async quickWorker(gen: number): Promise<void> {
+    await this.lanes(
+      gen,
+      2,
+      async (p) => {
+        if ((await this.thumbs.state(p)) === 'none') {
+          const t = await this.thumbs.quick(p, this.heads).catch(() => undefined);
+          if (t) {
+            this.quickMade++;
+            this.onMade(p, t);
+          }
+        }
+      },
+      () => this.quickDone++,
+    );
   }
 
   private async sharpWorker(gen: number): Promise<void> {
-    let folder = '';
-    for (let i = 0; ; i++) {
-      const p = await this.next(gen, i);
-      if (!p) {
-        if (folder) {
-          await this.thumbs.compact(vscode.Uri.file(folder));
-        }
-        return;
-      }
-      await this.waitTurn(gen);
-      if (!this.live(gen)) {
-        return;
-      }
-      const dir = path.dirname(p.uri.fsPath);
-      if (dir !== folder) {
-        // Sharp thumbnails replace quick ones; reclaim that space folder by folder.
-        if (folder) {
-          await this.thumbs.compact(vscode.Uri.file(folder));
-        }
-        folder = dir;
-        if (Date.now() - this.lastCapCheck > 20000) {
-          this.lastCapCheck = Date.now();
-          if ((await this.store.cache.stats()).bytes > this.capBytes() * 0.95) {
-            this.cacheFull = true; // stops the quick worker and the crawl too
-            return;
+    const folders = new Set<string>();
+    // One photo in flight per decoding thread (Lightroom exports need a full read and decode).
+    await this.lanes(
+      gen,
+      codecThreads(),
+      async (p) => {
+        const dir = path.dirname(p.uri.fsPath);
+        if (!folders.has(dir)) {
+          folders.add(dir);
+          if (Date.now() - this.lastCapCheck > 20000) {
+            this.lastCapCheck = Date.now();
+            if ((await this.store.cache.stats()).bytes > this.capBytes() * 0.95) {
+              this.cacheFull = true; // stops every lane, the quick pass and the crawl
+              return;
+            }
           }
         }
-      }
-      if ((await this.thumbs.state(p)) !== 'sharp') {
-        const t = await this.thumbs.sharp(p, this.heads, this.fulls).catch(() => undefined);
-        if (t) {
-          this.sharpMade++;
-          this.onMade(p, t);
-        } else {
-          this.failed++;
+        if ((await this.thumbs.state(p)) !== 'sharp') {
+          const t = await this.thumbs.sharp(p, this.heads, this.fulls).catch(() => undefined);
+          if (t) {
+            this.sharpMade++;
+            this.onMade(p, t);
+          } else {
+            this.failed++;
+          }
         }
-      }
-      this.sharpDone = i + 1;
-      this.report();
+      },
+      () => this.sharpDone++,
+    );
+    // Sharp thumbnails replaced quick ones: reclaim that space.
+    for (const dir of folders) {
+      await this.thumbs.compact(vscode.Uri.file(dir));
     }
   }
 

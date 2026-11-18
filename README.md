@@ -61,8 +61,10 @@ cache** on this computer (in VS Code's extension storage, never on the share):
   - **sharp pass**: proper thumbnails from the ~1600 px preview many cameras store inside the JPEG
     (MPF), about 0.3 MB read instead of the whole file; photos without one fall back to a full read.
 
-  Decoding uses WebAssembly codecs (mozjpeg, libwebp) on worker threads, so the editor stays
-  responsive. The workers read the share gently, wait while you browse, skip what is already cached
+  Decoding uses WebAssembly codecs (mozjpeg, libwebp) on worker threads (all cores but one, 2–6),
+  several photos at a time, so the editor stays responsive. JPEGs exported by Lightroom and similar
+  apps have no built-in preview, so each needs one full read; **Thumbnail Progress… › Show Log**
+  explains the first full reads of a session (which header segments the file has). The workers read the share gently, wait while you browse, skip what is already cached
   (a restart continues where it stopped) and stop if the cache is full. **Photo Library: Thumbnail
   Progress…** shows the details and can pause, resume or stop; **Build All Thumbnails** starts a
   run; `vsphoto.backgroundThumbnails` turns the automatic build off.

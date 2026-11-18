@@ -20,6 +20,9 @@ export function activate(context: vscode.ExtensionContext): void {
   const cache = new CacheManager(cacheDir, capMb() * 1024 * 1024);
   const store = new PhotoStore(cache);
   const thumbs = new ThumbService(store);
+  const output = vscode.window.createOutputChannel('Photo Library');
+  context.subscriptions.push(output);
+  thumbs.log = (line) => output.appendLine(`[${new Date().toLocaleTimeString()}] ${line}`);
   const edits = new EditStore();
   const mover = new Mover(context, libraries, store, edits);
   const grids = new GridPanels(context, libraries, store, mover, thumbs, edits);
@@ -126,7 +129,11 @@ export function activate(context: vscode.ExtensionContext): void {
       const running = background.status === 'running';
       const paused = background.status === 'paused';
       const actions = running ? ['Pause', 'Stop'] : paused ? ['Resume', 'Stop'] : ['Start'];
-      const pick = await vscode.window.showInformationMessage(background.summary(), ...actions);
+      const pick = await vscode.window.showInformationMessage(background.summary(), ...actions, 'Show Log');
+      if (pick === 'Show Log') {
+        output.show();
+        return;
+      }
       if (pick === 'Pause') {
         background.pause();
       } else if (pick === 'Resume' || pick === 'Start') {

@@ -373,6 +373,42 @@ function parseMpf(buf: Uint8Array, base: number, end: number): ByteRange[] {
   return out.sort((a, b) => b.length - a.length);
 }
 
+/**
+ * The JPEG's header segments (everything before the image data) as seen in `head`:
+ * `complete` is false when `head` ends before the image data starts (more bytes needed to see
+ * every segment). `summary` is a short description for diagnostics.
+ */
+export function jpegSegments(head: Uint8Array): { complete: boolean; summary: string } {
+  if (head.length < 4 || head[0] !== 0xff || head[1] !== 0xd8) {
+    return { complete: true, summary: 'not a JPEG' };
+  }
+  const parts: string[] = [];
+  let off = 2;
+  while (off + 4 <= head.length) {
+    if (head[off] !== 0xff) {
+      return { complete: true, summary: parts.join(', ') + `, corrupt at ${off}` };
+    }
+    const marker = head[off + 1];
+    if (marker === 0xda) {
+      parts.push(`image data @${off}`);
+      return { complete: true, summary: parts.join(', ') };
+    }
+    const len = (head[off + 2] << 8) | head[off + 3];
+    let tag = '';
+    if (marker >= 0xe0 && marker <= 0xef) {
+      const id = String.fromCharCode(...head.subarray(off + 4, Math.min(off + 4 + 12, head.length)))
+        .split('\0')[0]
+        .replace(/[^\x20-\x7e]/g, '');
+      tag = `APP${marker - 0xe0}${id ? `(${id.slice(0, 28)})` : ''}`;
+    } else {
+      tag = 'FF' + marker.toString(16).toUpperCase();
+    }
+    parts.push(`${tag} ${(len / 1024).toFixed(1)}KB @${off}`);
+    off += 2 + len;
+  }
+  return { complete: false, summary: parts.join(', ') + ` … (header continues past ${head.length} bytes)` };
+}
+
 /** True when bytes look like a baseline/progressive JPEG a browser can decode. */
 export function isBrowserJpeg(bytes: Uint8Array): boolean {
   if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) {

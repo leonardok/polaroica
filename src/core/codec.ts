@@ -6,6 +6,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { pathToFileURL } from 'url';
 import { Worker } from 'worker_threads';
+import * as os from 'os';
 import { downscale, orient, Rgba, trimBars } from './image';
 
 interface Decoder {
@@ -193,6 +194,15 @@ class Pool {
   }
 }
 
+/**
+ * Decoding threads: all but one core (the editor keeps one), between 2 and 6. Decoding a 24 MP
+ * JPEG is the slow part when a photo has no built-in preview (e.g. Lightroom exports).
+ */
+export function codecThreads(): number {
+  const cores = typeof os.availableParallelism === 'function' ? os.availableParallelism() : os.cpus().length;
+  return Math.max(2, Math.min(6, cores - 1));
+}
+
 let pool: Pool | undefined;
 let poolFailed = false;
 
@@ -200,7 +210,7 @@ let poolFailed = false;
 export async function makeThumb(jpeg: Uint8Array, opts: ThumbOptions): Promise<MadeThumb> {
   if (!pool && !poolFailed && fs.existsSync(path.join(__dirname, 'codecWorker.js'))) {
     try {
-      pool = new Pool(2);
+      pool = new Pool(codecThreads());
     } catch {
       poolFailed = true;
     }

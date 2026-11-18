@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { QUICK_PX, Thumb } from './core/cache';
 import { makeThumb } from './core/codec';
-import { embeddedPreviews, embeddedThumbnail, isBrowserJpeg, mpfPreviews, readExif } from './core/exif';
+import { embeddedPreviews, embeddedThumbnail, isBrowserJpeg, jpegSegments, mpfPreviews, readExif } from './core/exif';
 import { extensionOf, isDisplayable, isRaw } from './core/images';
 import { Photo, PhotoStore, readHead, readRange } from './photoStore';
 
@@ -53,6 +53,7 @@ export class Limiter {
 // EXIF (APP1) is at most 64 KB and the MPF index (APP2) follows it: 72 KB covers both.
 const HEAD_BYTES = 72 * 1024;
 const RAW_HEAD_BYTES = 256 * 1024;
+const LONG_HEAD_BYTES = 512 * 1024;
 const MAX_SOURCE_BYTES = 80 * 1024 * 1024;
 const MAX_PREVIEW_BYTES = 8 * 1024 * 1024;
 
@@ -146,12 +147,18 @@ export class ThumbService {
     if (!isJpeg(photo.name)) {
       return undefined;
     }
-    const head = await heads.run(() => this.head(photo, HEAD_BYTES));
+    let head = await heads.run(() => this.head(photo, HEAD_BYTES));
     if (!head) {
       return undefined;
     }
+    // XMP or ICC segments can push the MPF index past the first read: read further.
+    if (!mpfPreviews(head).length && !jpegSegments(head).complete && photo.size > head.length) {
+      head = (await heads.run(() => readHead(photo.uri.fsPath, LONG_HEAD_BYTES).catch(() => undefined))) ?? head;
+    }
     const orientation = readExif(head)?.orientation;
-    for (const r of mpfPreviews(head)) {
+    const previews = mpfPreviews(head);
+    let why = previews.length ? 'built-in preview unusable' : 'no built-in preview (MPF) found';
+    for (const r of previews) {
       if (r.length > MAX_PREVIEW_BYTES || r.offset + r.length > photo.size) {
         continue;
       }
@@ -164,7 +171,9 @@ export class ThumbService {
       if (t && Math.max(t.sourceWidth, t.sourceHeight) >= px) {
         return this.store_(photo, t, 'preview');
       }
+      why = t ? `built-in preview too small (${t.sourceWidth}×${t.sourceHeight})` : 'built-in preview could not be decoded';
     }
+    this.logFallback(photo, why, head);
     if (photo.size > MAX_SOURCE_BYTES) {
       return undefined;
     }
@@ -182,6 +191,21 @@ export class ThumbService {
     await this.save(photo, thumb, thumbPx());
     this.sources[source]++;
     return thumb;
+  }
+
+  private fallbacksLogged = 0;
+  /** Written to the "Photo Library" output channel: why a photo needed a full read. */
+  log?: (line: string) => void;
+
+  private logFallback(photo: Photo, why: string, head: Uint8Array): void {
+    if (!this.log || this.fallbacksLogged >= 10) {
+      return;
+    }
+    this.fallbacksLogged++;
+    this.log(`Full read for ${photo.name} (${(photo.size / 1048576).toFixed(1)} MB): ${why}. Header: ${jpegSegments(head).summary}`);
+    if (this.fallbacksLogged === 10) {
+      this.log('(only the first 10 full reads are explained)');
+    }
   }
 
   /** The file's bytes, for the webview decoder (formats the codec can't read). */

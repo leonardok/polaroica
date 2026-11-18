@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import { test } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import { makeThumb } from '../core/codec';
-import { embeddedThumbnail, mpfPreviews, readExif } from '../core/exif';
+import { embeddedThumbnail, jpegSegments, mpfPreviews, readExif } from '../core/exif';
 import { downscale, orient, trimBars } from '../core/image';
 
 const importEsm = new Function('s', 'return import(s)') as (s: string) => Promise<any>;
@@ -29,7 +29,7 @@ async function jpeg(w: number, h: number, rgb: [number, number, number], bars = 
 }
 
 /** A camera-like JPEG: EXIF (orientation 6 + IFD1 thumbnail) and an MPF preview at the end. */
-async function cameraJpeg() {
+async function cameraJpeg(xmpPadding = 0) {
   const main = await jpeg(1200, 800, [200, 40, 40]); // red
   const preview = await jpeg(600, 400, [40, 200, 40]); // green: proves the preview was used
   const thumb = await jpeg(160, 120, [40, 40, 200], 13); // blue, letterboxed 4:3
@@ -63,10 +63,19 @@ async function cameraJpeg() {
   const app2Body = Buffer.concat([Buffer.from('MPF\0', 'latin1'), mp]);
   const app2 = Buffer.concat([Buffer.from([0xff, 0xe2, (app2Body.length + 2) >> 8, (app2Body.length + 2) & 0xff]), app2Body]);
 
+  // Optional XMP segment (as editing apps add) between EXIF and MPF.
+  // Optional XMP + ICC profile segments (as editing apps add) between EXIF and MPF.
+  const seg = (marker: number, id: string, pad: number) => {
+    const body = Buffer.concat([Buffer.from(id + '\0', 'latin1'), Buffer.alloc(pad, 0x20)]);
+    return Buffer.concat([Buffer.from([0xff, marker, (body.length + 2) >> 8, (body.length + 2) & 0xff]), body]);
+  };
+  const xmp = xmpPadding
+    ? Buffer.concat([seg(0xe1, 'http://ns.adobe.com/xap/1.0/', xmpPadding), seg(0xe2, 'ICC_PROFILE', xmpPadding)])
+    : Buffer.alloc(0);
   const body = main.subarray(2); // main image without its SOI
-  const file = Buffer.concat([Buffer.from([0xff, 0xd8]), app1, app2, body, preview]);
-  const mpHeaderStart = 2 + app1.length + 4 + 4; // after FFE2 + length + "MPF\0"
-  const previewStart = 2 + app1.length + app2.length + body.length;
+  const file = Buffer.concat([Buffer.from([0xff, 0xd8]), app1, xmp, app2, body, preview]);
+  const mpHeaderStart = 2 + app1.length + xmp.length + 4 + 4; // after FFE2 + length + "MPF\0"
+  const previewStart = 2 + app1.length + xmp.length + app2.length + body.length;
   // MP entries: primary (offset 0), preview (offset relative to the MP header).
   const entries = mpHeaderStart + 38;
   file.writeUInt32LE(0x030000, entries); file.writeUInt32LE(previewStart, entries + 4); file.writeUInt32LE(0, entries + 8);
@@ -115,4 +124,15 @@ test('pixel helpers: downscale averages, orient rotates, trimBars needs matching
   const px = new Uint8ClampedArray(w * h * 4).fill(200);
   for (let i = 0; i < w * 2 * 4; i++) px[i] = 0;
   assert.equal(trimBars({ data: px, width: w, height: h }).height, 8);
+});
+
+test('MPF index behind a large XMP segment: found once enough of the header is read', async () => {
+  const { file, preview, previewStart } = await cameraJpeg(40000);
+  const short = file.subarray(0, 72 * 1024);
+  assert.equal(mpfPreviews(short).length, 0, 'not within the first 72 KB');
+  assert.equal(jpegSegments(short).complete, false, 'so the header is known to continue');
+  assert.match(jpegSegments(short).summary, /APP1\(Exif\).*APP1\(http:\/\/ns\.ad.*APP2\(ICC_PROFILE\)/);
+  const long = file.subarray(0, 512 * 1024);
+  assert.deepEqual(mpfPreviews(long)[0], { offset: previewStart, length: preview.length });
+  assert.equal(jpegSegments(long).complete, true);
 });
