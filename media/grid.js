@@ -1,6 +1,7 @@
 // Library view: photo grid for one folder.
 (function () {
-  const { vscode, h, icon, crumbs, detailsList, picture } = window.vsphoto;
+  const { vscode, h, icon, crumbs, detailsList, picture, createLoader } = window.vsphoto;
+  const loader = createLoader(4);
   const app = document.getElementById('app');
 
   let photos = [];
@@ -83,6 +84,7 @@
   }
 
   function render(state) {
+    loader.reset();
     photos = state.photos;
     sort = state.sort;
     if (!(vscode.getState() || {}).tileSize && state.tileSize) {
@@ -136,7 +138,7 @@
           ondblclick: () => post({ type: 'open', name: p.name }),
           ondragstart: (e) => onDragStart(e, i),
         },
-        h('span', { class: 'thumb' }, picture(p, 'thumb-img', true)),
+        h('span', { class: 'thumb' }, picture(p, 'thumb-img', loader)),
         h('span', { class: 'label' }, p.name),
       ),
     );
@@ -233,6 +235,8 @@
       if (detailsEl) {
         renderDetails(m.details);
       }
+    } else if (m.type === 'visible') {
+      loader.setPaused(!m.visible);
     } else if (m.type === 'error') {
       app.replaceChildren(h('div', { class: 'message' }, m.message));
     }

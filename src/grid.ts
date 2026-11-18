@@ -76,7 +76,11 @@ export class GridPanels implements vscode.Disposable {
       this.panels.delete(folder.fsPath);
       this.updateStatus();
     });
-    panel.onDidChangeViewState(() => this.updateStatus());
+    panel.onDidChangeViewState((e) => {
+      this.updateStatus();
+      // Stop pulling photos over the network while the grid is not on screen.
+      void panel.webview.postMessage({ type: 'visible', visible: e.webviewPanel.visible });
+    });
   }
 
   /** Forget panels for a folder that was moved away. */

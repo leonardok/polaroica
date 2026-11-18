@@ -72,17 +72,20 @@
     return dl;
   }
 
-  /** Thumbnail or a labelled placeholder for formats a browser can't draw (RAW, TIFF, HEIC). */
-  function picture(photo, cls, lazy) {
+  /**
+   * Thumbnail or a labelled placeholder for formats a browser can't draw (RAW, TIFF, HEIC).
+   * With a loader, the <img> gets its src only when the loader decides (on screen, in turn).
+   */
+  function picture(photo, cls, loader) {
     if (photo.src) {
-      return h('img', {
-        class: cls,
-        src: photo.src,
-        alt: photo.name,
-        loading: lazy ? 'lazy' : undefined,
-        decoding: 'async',
-        draggable: 'false',
-      });
+      const img = h('img', { class: cls, alt: photo.name, decoding: 'async', draggable: 'false' });
+      if (loader) {
+        img.dataset.src = photo.src;
+        loader.observe(img);
+      } else {
+        img.src = photo.src;
+      }
+      return img;
     }
     return h(
       'div',
@@ -92,5 +95,94 @@
     );
   }
 
-  window.vsphoto = { vscode, h, icon, crumbs, detailsList, picture };
+  /**
+   * Loads images that are on screen, at most `max` at a time, top to bottom. Scrolling a
+   * loading image away, or hiding the tab, cancels its download, so a slow network share is
+   * never asked for photos nobody is looking at.
+   */
+  function createLoader(max, root) {
+    const visible = new Set();
+    const loading = new Set();
+    let paused = false;
+
+    const cancel = (img) => {
+      img.onload = img.onerror = null;
+      img.removeAttribute('src');
+      loading.delete(img);
+    };
+    const pump = () => {
+      if (paused || document.hidden) {
+        return;
+      }
+      for (const img of visible) {
+        if (loading.size >= max) {
+          break;
+        }
+        if (img.dataset.loaded || loading.has(img)) {
+          continue;
+        }
+        loading.add(img);
+        img.onload = img.onerror = () => {
+          img.onload = img.onerror = null;
+          loading.delete(img);
+          img.dataset.loaded = '1';
+          img.classList.add('ready');
+          pump();
+        };
+        img.src = img.dataset.src;
+      }
+    };
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          const img = e.target;
+          if (e.isIntersecting) {
+            visible.add(img);
+          } else {
+            visible.delete(img);
+            if (loading.has(img)) {
+              cancel(img);
+            }
+          }
+        }
+        pump();
+      },
+      { root: root || null, rootMargin: '200px' },
+    );
+    const pauseAll = () => {
+      for (const img of [...loading]) {
+        cancel(img);
+      }
+    };
+    const onVisibility = () => (document.hidden ? pauseAll() : pump());
+    let listening = false;
+
+    return {
+      observe(img) {
+        if (!listening) {
+          document.addEventListener('visibilitychange', onVisibility);
+          listening = true;
+        }
+        io.observe(img);
+      },
+      /** Pause while the tab is hidden or the page needs the bandwidth for something else. */
+      setPaused(p) {
+        paused = p;
+        if (p) {
+          pauseAll();
+        } else {
+          pump();
+        }
+      },
+      reset() {
+        io.disconnect();
+        document.removeEventListener('visibilitychange', onVisibility);
+        listening = false;
+        pauseAll();
+        visible.clear();
+      },
+    };
+  }
+
+  window.vsphoto = { vscode, h, icon, crumbs, detailsList, picture, createLoader };
 })();

@@ -1,25 +1,42 @@
 import * as crypto from 'crypto';
+import * as fs from 'fs';
 import * as vscode from 'vscode';
 
 export function nonce(): string {
   return crypto.randomBytes(16).toString('base64');
 }
 
-/** HTML shell for our webviews: strict CSP, our own CSS and script only. */
+const assetCache = new Map<string, string>();
+
+/** Reads a file from media/ once. Inlined so a webview paints without fetching anything. */
+function asset(extensionUri: vscode.Uri, file: string): string {
+  const p = vscode.Uri.joinPath(extensionUri, 'media', file).fsPath;
+  let text = assetCache.get(p);
+  if (text === undefined) {
+    text = fs.readFileSync(p, 'utf8');
+    assetCache.set(p, text);
+  }
+  return text;
+}
+
+/**
+ * HTML for our webviews: strict CSP; CSS and scripts inlined. Inlining matters: webview
+ * resources share one loader, and photos streaming from a slow share must not hold up the UI.
+ */
 export function webviewHtml(
   webview: vscode.Webview,
   extensionUri: vscode.Uri,
   opts: { title: string; script: string; style: string; body: string },
 ): string {
   const n = nonce();
-  const media = (f: string) => webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', f));
   const csp = [
     "default-src 'none'",
     `img-src ${webview.cspSource} data: blob:`,
-    `style-src ${webview.cspSource}`,
-    `font-src ${webview.cspSource}`,
+    `style-src 'nonce-${n}'`,
     `script-src 'nonce-${n}'`,
   ].join('; ');
+  // A literal "</" inside inlined code would end the tag early.
+  const safe = (s: string) => s.replace(/<\/(script|style)/gi, '<\\/$1');
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -27,13 +44,13 @@ export function webviewHtml(
 <meta http-equiv="Content-Security-Policy" content="${csp}">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(opts.title)}</title>
-<link rel="stylesheet" href="${media('common.css')}">
-<link rel="stylesheet" href="${media(opts.style)}">
+<style nonce="${n}">${safe(asset(extensionUri, 'common.css'))}
+${safe(asset(extensionUri, opts.style))}</style>
 </head>
 <body>
 ${opts.body}
-<script nonce="${n}" src="${media('common.js')}"></script>
-<script nonce="${n}" src="${media(opts.script)}"></script>
+<script nonce="${n}">${safe(asset(extensionUri, 'common.js'))}</script>
+<script nonce="${n}">${safe(asset(extensionUri, opts.script))}</script>
 </body>
 </html>`;
 }

@@ -1,6 +1,7 @@
 // Photo tab: one photo at full view; ← → browse the folder in this tab.
 (function () {
-  const { vscode, h, icon, crumbs, detailsList, picture } = window.vsphoto;
+  const { vscode, h, icon, crumbs, detailsList, picture, createLoader } = window.vsphoto;
+  let stripLoader;
   const app = document.getElementById('app');
   let zoom = (vscode.getState() || {}).zoom || 'fit';
   let detailsEl;
@@ -11,8 +12,29 @@
     const fitBtn = h('button', { class: 'btn' + (zoom === 'fit' ? ' on' : ''), 'aria-pressed': String(zoom === 'fit'), onclick: () => setZoom('fit') }, 'Fit');
     const fullBtn = h('button', { class: 'btn' + (zoom === 'full' ? ' on' : ''), 'aria-pressed': String(zoom === 'full'), onclick: () => setZoom('full') }, '100%');
 
-    const img = picture(m.photo, 'photo', false);
+    if (stripLoader) {
+      stripLoader.reset();
+    }
+    // Filmstrip neighbours wait until the main photo is in, then load two at a time.
+    stripLoader = createLoader(2);
+    stripLoader.setPaused(true);
+    const img = picture(m.photo, 'photo', null);
     img.addEventListener('dblclick', () => post({ type: 'grid' }));
+    const loadingNote = h('div', { class: 'loading', role: 'status' }, 'Loading photo…');
+    if (img.tagName === 'IMG') {
+      const done = () => {
+        loadingNote.remove();
+        stripLoader.setPaused(false);
+      };
+      img.addEventListener('load', done);
+      img.addEventListener('error', () => {
+        loadingNote.textContent = 'Could not load this photo.';
+        stripLoader.setPaused(false);
+      });
+    } else {
+      loadingNote.remove();
+      stripLoader.setPaused(false);
+    }
     img.title = 'Double-click to go back to the grid';
     if (m.photo.raw || !m.photo.src) {
       img.append(h('span', { class: 'raw-note' }, 'Preview for this format is not supported yet'));
@@ -31,7 +53,7 @@
             title: s.name,
             onclick: () => post({ type: 'goto', index: s.index }),
           },
-          picture(s, 'strip-img', true),
+          picture(s, 'strip-img', stripLoader),
         ),
       ),
     );
@@ -56,7 +78,7 @@
             'div',
             { class: 'stage' },
             h('button', { class: 'nav', 'aria-label': 'Previous photo (←)', title: 'Previous (←)', onclick: () => post({ type: 'step', delta: -1 }) }, icon('left', 18)),
-            h('div', { class: 'frame ' + zoom }, img),
+            h('div', { class: 'frame ' + zoom }, img, loadingNote),
             h('button', { class: 'nav', 'aria-label': 'Next photo (→)', title: 'Next (→)', onclick: () => post({ type: 'step', delta: 1 }) }, icon('right', 18)),
           ),
           h('footer', { class: 'film' }, strip, h('p', { class: 'hint' }, '← → previous / next · double-click the photo to go back to the grid')),
