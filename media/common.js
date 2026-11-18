@@ -164,5 +164,36 @@
     return { data: new Uint8Array(await out.arrayBuffer()), w, h };
   }
 
-  window.vsphoto = { vscode, h, icon, crumbs, detailsList, picture, blobUrl, makeThumbnail };
+  /**
+   * A collapsible panel section (DETAILS, ADJUST…). Open/closed is remembered per section id
+   * across photos and reloads of the tab.
+   */
+  function section(id, title, ...children) {
+    const state = vscode.getState() || {};
+    const closed = (state.closedSections || []).includes(id);
+    const el = h(
+      'details',
+      { class: 'section', open: !closed, dataset: { section: id } },
+      h('summary', {}, h('span', { class: 'chevron', 'aria-hidden': 'true' }, icon('right', 12)), title),
+      h('div', { class: 'section-body' }, ...children),
+    );
+    el.addEventListener('toggle', () => {
+      const st = vscode.getState() || {};
+      const set = new Set(st.closedSections || []);
+      if (el.open) {
+        set.delete(id);
+      } else {
+        set.add(id);
+      }
+      vscode.setState({ ...st, closedSections: [...set] });
+    });
+    return el;
+  }
+
+  /** Marks an element as a photo for the right-click menu (Move to…, Reveal in OS). */
+  function photoContext(name) {
+    return JSON.stringify({ webviewSection: 'photo', photo: name, preventDefaultContextMenuItems: true });
+  }
+
+  window.vsphoto = { vscode, h, icon, crumbs, detailsList, picture, blobUrl, makeThumbnail, section, photoContext };
 })();

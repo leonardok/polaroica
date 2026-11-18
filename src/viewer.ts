@@ -46,6 +46,20 @@ export class PhotoViewers implements vscode.Disposable {
     );
   }
 
+  /** Right-click menu on the photo in the active photo tab. */
+  async contextAction(action: 'move' | 'reveal'): Promise<void> {
+    const v = [...this.viewers].find((x) => x.panel.active);
+    const photo = v?.current;
+    if (!photo) {
+      return;
+    }
+    if (action === 'reveal') {
+      await vscode.commands.executeCommand('revealFileInOS', photo.uri);
+    } else {
+      await this.mover.moveWithPicker([photo.uri]);
+    }
+  }
+
   open(folder: vscode.Uri, name: string, sort: SortKey): void {
     const file = path.join(folder.fsPath, name);
     for (const v of this.viewers) {

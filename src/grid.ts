@@ -92,6 +92,21 @@ export class GridPanels implements vscode.Disposable {
     });
   }
 
+  /** Right-click menu on a photo in the active grid: acts on the selection when it holds the photo. */
+  async contextAction(action: 'move' | 'reveal', name: string | undefined): Promise<void> {
+    const grid = [...this.panels.values()].find((p) => p.panel.active);
+    if (!grid || !name) {
+      return;
+    }
+    const uriOf = (n: string) => vscode.Uri.file(path.join(grid.folder.fsPath, n));
+    if (action === 'reveal') {
+      await vscode.commands.executeCommand('revealFileInOS', uriOf(name));
+    } else {
+      const names = grid.selected.includes(name) ? grid.selected : [name];
+      await this.mover.moveWithPicker(names.map(uriOf));
+    }
+  }
+
   /** A thumbnail made by the background builder: show it in an open grid of its folder. */
   offer(photo: Photo, t: Thumb): void {
     const grid = this.panels.get(path.dirname(photo.uri.fsPath));

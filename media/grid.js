@@ -1,7 +1,7 @@
 // Library view: photo grid for one folder. Shows thumbnails only (never the originals): the
 // extension sends cached ones, placeholders, and asks this page to decode + shrink the rest.
 (function () {
-  const { vscode, h, icon, crumbs, detailsList, blobUrl, makeThumbnail } = window.vsphoto;
+  const { vscode, h, icon, crumbs, detailsList, blobUrl, makeThumbnail, section, photoContext } = window.vsphoto;
   const app = document.getElementById('app');
 
   let photos = [];
@@ -176,7 +176,7 @@
       oninput: (e) => {
         tileSize = Number(e.target.value);
         gridEl.style.setProperty('--tile', tileSize + 'px');
-        vscode.setState({ tileSize });
+        vscode.setState({ ...(vscode.getState() || {}), tileSize });
       },
       onchange: () => post({ type: 'tileSize', size: tileSize }),
     });
@@ -222,6 +222,13 @@
           dataset: { i: String(i) },
           onclick: (e) => select(i, e),
           ondblclick: () => post({ type: 'open', name: p.name }),
+          // Right-click: make sure the clicked photo is part of the selection first.
+          oncontextmenu: () => {
+            if (!selected.has(p.name)) {
+              select(i, null);
+            }
+          },
+          'data-vscode-context': photoContext(p.name),
           ondragstart: (e) => onDragStart(e, i),
         },
         h(
@@ -239,7 +246,8 @@
     });
     gridEl.append(...tiles);
 
-    detailsEl = h('aside', { class: 'details', 'aria-label': 'Photo details' }, h('h2', {}, 'DETAILS'), h('p', { class: 'sub' }, 'Select a photo to see its details.'));
+    detailsEl = h('aside', { class: 'details', 'aria-label': 'Photo details' });
+    renderDetails(undefined);
 
     app.replaceChildren(
       h(
@@ -303,29 +311,26 @@
 
   function renderDetails(d) {
     if (!d) {
-      detailsEl.replaceChildren(h('h2', {}, 'DETAILS'), h('p', { class: 'sub' }, 'Select a photo to see its details.'));
+      detailsEl.replaceChildren(section('details', 'DETAILS', h('p', { class: 'sub' }, 'Select a photo to see its details.')));
       return;
     }
-    const names = [...selected];
     const known = thumbs.get(d.photo.name);
     const url = d.thumb ? blobUrl(d.thumb, 'image/webp') : known?.url;
     const preview = url
-      ? h('img', { class: 'preview', src: url, alt: '' })
+      ? h('img', { class: 'preview', src: url, alt: '', 'data-vscode-context': photoContext(d.photo.name) })
       : h('div', { class: 'preview raw-placeholder', 'aria-hidden': 'true' }, icon('photo', 22), d.photo.ext);
     detailsEl.replaceChildren(
-      h('h2', {}, 'DETAILS'),
-      preview,
-      h('div', {}, h('div', { class: 'name' }, d.photo.name), d.more > 0 ? h('div', { class: 'sub' }, `+ ${d.more} more selected`) : null),
-      detailsList(d.rows),
-      h(
-        'div',
-        { class: 'actions' },
-        h('button', { class: 'btn primary', onclick: () => post({ type: 'open', name: d.photo.name }) }, 'Open'),
-        h('button', { class: 'btn', onclick: () => post({ type: 'move', names: names.length ? names : [d.photo.name] }) }, 'Move to…'),
-        h('button', { class: 'btn', onclick: () => post({ type: 'reveal', name: d.photo.name }) }, 'Reveal in OS'),
+      section(
+        'details',
+        'DETAILS',
+        preview,
+        h('div', {}, h('div', { class: 'name' }, d.photo.name), d.more > 0 ? h('div', { class: 'sub' }, `+ ${d.more} more selected`) : null),
+        detailsList(d.rows),
+        h('p', { class: 'hint-small' }, 'Double-click to open · right-click for Move to… and Reveal in OS'),
       ),
     );
   }
+
 
   window.addEventListener('message', (e) => {
     const m = e.data;

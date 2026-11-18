@@ -1,7 +1,7 @@
 // Photo tab: one photo at full view; ← → browse the folder in this tab.
 // The cached thumbnail shows at once, scaled up, while the original streams in from the share.
 (function () {
-  const { vscode, h, icon, crumbs, detailsList, blobUrl } = window.vsphoto;
+  const { vscode, h, icon, crumbs, detailsList, blobUrl, section, photoContext } = window.vsphoto;
   const app = document.getElementById('app');
   let zoom = (vscode.getState() || {}).zoom || 'fit';
   let detailsEl, frameEl, noteEl, current;
@@ -20,7 +20,12 @@
     const fullBtn = h('button', { class: 'btn' + (zoom === 'full' ? ' on' : ''), 'aria-pressed': String(zoom === 'full'), onclick: () => setZoom('full') }, '100%');
 
     noteEl = h('div', { class: 'loading', role: 'status' }, 'Loading photo…');
-    frameEl = h('div', { class: 'frame ' + zoom, ondblclick: () => post({ type: 'grid' }), title: 'Double-click to go back to the grid' });
+    frameEl = h('div', {
+      class: 'frame ' + zoom,
+      ondblclick: () => post({ type: 'grid' }),
+      title: 'Double-click to go back to the grid · right-click for more',
+      'data-vscode-context': photoContext(m.photo.name),
+    });
     if (m.thumb) {
       frameEl.append(h('img', { class: 'photo standin' + (m.thumbQuick ? ' soft' : ''), src: track(blobUrl(m.thumb, 'image/webp')), alt: '' }));
     }
@@ -52,7 +57,8 @@
       ),
     );
 
-    detailsEl = h('aside', { class: 'details', 'aria-label': 'Photo details' }, h('h2', {}, 'DETAILS'), h('div', { class: 'name' }, m.photo.name));
+    detailsEl = h('aside', { class: 'details', 'aria-label': 'Photo panel', dataset: { name: m.photo.name } });
+    renderDetails([]);
 
     app.replaceChildren(
       h(
@@ -114,7 +120,7 @@
 
   function setZoom(z) {
     zoom = z;
-    vscode.setState({ zoom });
+    vscode.setState({ ...(vscode.getState() || {}), zoom });
     if (frameEl) {
       frameEl.classList.toggle('fit', z === 'fit');
       frameEl.classList.toggle('full', z === 'full');
@@ -130,19 +136,17 @@
     if (!detailsEl) {
       return;
     }
-    const name = detailsEl.querySelector('.name')?.textContent || '';
     detailsEl.replaceChildren(
-      h('h2', {}, 'DETAILS'),
-      h('div', { class: 'name' }, name),
-      detailsList(rows),
-      h(
-        'div',
-        { class: 'actions' },
-        h('button', { class: 'btn', onclick: () => post({ type: 'reveal' }) }, 'Reveal in OS'),
-        h('button', { class: 'btn', onclick: () => post({ type: 'move' }) }, 'Move to…'),
+      section(
+        'details',
+        'DETAILS',
+        h('div', { class: 'name' }, detailsEl.dataset.name || ''),
+        detailsList(rows),
+        h('p', { class: 'hint-small' }, 'Right-click the photo for Move to… and Reveal in OS'),
       ),
     );
   }
+
 
   window.addEventListener('keydown', (e) => {
     if (e.altKey || e.ctrlKey || e.metaKey) {

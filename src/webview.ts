@@ -50,7 +50,7 @@ export function webviewHtml(
 <style nonce="${n}">${safe(asset(extensionUri, 'common.css'))}
 ${safe(asset(extensionUri, opts.style))}</style>
 </head>
-<body>
+<body data-vscode-context='{"preventDefaultContextMenuItems": true}'>
 ${opts.body}
 <script nonce="${n}">${safe(asset(extensionUri, 'common.js'))}</script>
 <script nonce="${n}">${safe(asset(extensionUri, opts.script))}</script>

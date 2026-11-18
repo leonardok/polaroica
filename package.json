@@ -2,7 +2,7 @@
   "name": "vsphoto",
   "displayName": "Photo Library",
   "description": "Browse and organize photo libraries \u2014 local folders and SMB network shares \u2014 inside VS Code.",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "publisher": "leonardok",
   "license": "GPL-3.0-or-later",
   "repository": {
@@ -104,6 +104,16 @@
         "command": "vsphoto.thumbnailProgress",
         "title": "Thumbnail Progress\u2026",
         "category": "Photo Library"
+      },
+      {
+        "command": "vsphoto.photoMoveTo",
+        "title": "Move to\u2026",
+        "category": "Photo Library"
+      },
+      {
+        "command": "vsphoto.photoReveal",
+        "title": "Reveal in OS",
+        "category": "Photo Library"
       }
     ],
     "menus": {
@@ -166,6 +176,26 @@
         {
           "command": "vsphoto.revealInOS",
           "when": "false"
+        },
+        {
+          "command": "vsphoto.photoMoveTo",
+          "when": "false"
+        },
+        {
+          "command": "vsphoto.photoReveal",
+          "when": "false"
+        }
+      ],
+      "webview/context": [
+        {
+          "command": "vsphoto.photoMoveTo",
+          "when": "(webviewId == 'vsphoto.grid' || webviewId == 'vsphoto.photo') && webviewSection == 'photo'",
+          "group": "1_photo@1"
+        },
+        {
+          "command": "vsphoto.photoReveal",
+          "when": "(webviewId == 'vsphoto.grid' || webviewId == 'vsphoto.photo') && webviewSection == 'photo'",
+          "group": "1_photo@2"
         }
       ]
     },

@@ -164,6 +164,17 @@ export function activate(context: vscode.ExtensionContext): void {
         store.invalidate(parent);
       }
     }),
+    // Right-click menu inside the grid and photo tabs (webview/context). VS Code passes the
+    // data-vscode-context of the clicked element: { webview, webviewSection, photo }.
+    ...(['move', 'reveal'] as const).map((action) =>
+      vscode.commands.registerCommand(action === 'move' ? 'vsphoto.photoMoveTo' : 'vsphoto.photoReveal', async (ctx?: { webview?: string; photo?: string }) => {
+        if (ctx?.webview === 'vsphoto.grid') {
+          await grids.contextAction(action, ctx.photo);
+        } else if (ctx?.webview === 'vsphoto.photo') {
+          await viewers.contextAction(action);
+        }
+      }),
+    ),
     vscode.commands.registerCommand('vsphoto.revealInOS', async (arg?: unknown) => {
       const uri = uriOf(arg);
       if (uri) {
