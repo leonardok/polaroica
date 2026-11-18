@@ -234,3 +234,15 @@ test('binary survives the trip to the webview', () => {
   assert.deepEqual(fromWire({ type: 'Buffer', data: [3, 4] })?.toJSON().data, [3, 4]);
   assert.deepEqual(fromWire({ 0: 5, 1: 6 })?.toJSON().data, [5, 6]);
 });
+
+test('album hover: counts by type and culling state, ignoring sidecars of photos that are gone', async () => {
+  const { albumStats } = await import('../core/albumStats');
+  const culling = new Map([
+    ['a.ARW', { rating: 5, flag: 'pick', edited: true, auto: {} }],
+    ['b.jpg', { rating: 2, flag: 'reject', edited: false }],
+    ['c.jpg', { rating: 0, edited: true }],
+    ['gone.jpg', { rating: 5, flag: 'pick', edited: false }],
+  ]);
+  const s = albumStats(['a.ARW', 'b.jpg', 'c.jpg', 'd.png'], culling);
+  assert.deepEqual(s, { photos: 4, raw: 1, jpeg: 2, other: 1, picks: 1, rejects: 1, toCull: 2, rated: 2, edited: 2, autoRanked: 1 });
+});

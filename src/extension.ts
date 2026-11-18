@@ -97,14 +97,8 @@ export function activate(context: vscode.ExtensionContext): void {
     await mover.move(files, target);
   });
   tree.media = vscode.Uri.joinPath(context.extensionUri, 'media');
-  tree.picksIn = async (folder) => {
-    let n = 0;
-    for (const c of (await edits.cullingIn(folder)).values()) {
-      if (c.flag === 'pick') n++;
-    }
-    return n;
-  };
-  context.subscriptions.push(edits.onDidChange((photo) => void tree.picksChanged(path.dirname(photo.fsPath))));
+  tree.cullingIn = (folder) => edits.cullingIn(folder);
+  context.subscriptions.push(edits.onDidChange((photo) => tree.cullingChanged(path.dirname(photo.fsPath))));
   const view = vscode.window.createTreeView('polaroica.libraries', {
     treeDataProvider: tree,
     dragAndDropController: tree,

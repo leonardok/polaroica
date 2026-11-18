@@ -1,5 +1,6 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { albumStats } from './core/albumStats';
 import { Libraries } from './libraries';
 import { isReachable, mapLimit, PhotoStore } from './photoStore';
 
@@ -29,9 +30,9 @@ export class LibraryTree implements vscode.TreeDataProvider<TreeNode>, vscode.Tr
   readonly dragMimeTypes = ['text/uri-list'];
 
   /** What we know about a folder's contents: photo count and whether it has sub-folders. */
-  private readonly info = new Map<string, { photos: number; subfolders: number; picks?: number }>();
-  /** Set by the extension: pick counts per album (from the sidecars). */
-  picksIn?: (folder: string) => Promise<number>;
+  private readonly info = new Map<string, { photos: number; subfolders: number }>();
+  /** Set by the extension: ratings and flags of an album's photos (from the sidecars), for the hover. */
+  cullingIn?: (folder: string) => Promise<ReadonlyMap<string, { rating: number; flag?: string; edited: boolean; auto?: unknown }>>;
   /** Set by the extension: the media folder, for the tree's own icons. */
   media?: vscode.Uri;
   private readonly offline = new Set<string>();
@@ -55,12 +56,10 @@ export class LibraryTree implements vscode.TreeDataProvider<TreeNode>, vscode.Tr
     });
   }
 
-  /** An album's picks changed: redraw its row. */
-  async picksChanged(folder: string): Promise<void> {
-    const i = this.info.get(folder);
+  /** An album's ratings or flags changed: redraw its row so the hover is made again. */
+  cullingChanged(folder: string): void {
     const node = this.nodes.get(folder);
-    if (i && node && this.picksIn) {
-      i.picks = await this.picksIn(folder).catch(() => 0);
+    if (node && this.info.has(folder)) {
       this.changed.fire(node);
     }
   }
@@ -118,11 +117,51 @@ export class LibraryTree implements vscode.TreeDataProvider<TreeNode>, vscode.Tr
     item.iconPath = album ? this.icon('album') : new vscode.ThemeIcon('folder', new vscode.ThemeColor('charts.yellow'));
     item.resourceUri = node.uri;
     item.contextValue = 'folder';
-    item.tooltip = node.uri.fsPath;
+    // The hover (photos, picks, rejects, still to cull…) is made when it's shown: resolveTreeItem.
     if (showCounts && info?.photos) {
-      item.description = info.photos.toLocaleString() + (info.picks ? ` · ${info.picks} ✓` : '');
+      item.description = info.photos.toLocaleString();
     }
     item.command = { command: 'polaroica.openFolder', title: 'Open', arguments: [node.uri] };
+    return item;
+  }
+
+  /** The album hover, made when it's about to show (reads the listing and sidecars: cached, quick). */
+  async resolveTreeItem(item: vscode.TreeItem, node: TreeNode): Promise<vscode.TreeItem> {
+    if (!(node instanceof FolderNode)) {
+      return item;
+    }
+    const name = path.basename(node.uri.fsPath);
+    const md = new vscode.MarkdownString('', true);
+    md.appendMarkdown(`**${escapeMd(name)}**\n\n`);
+    try {
+      const listing = await this.store.listing(node.uri);
+      const names = listing.photos.map((p) => p.name);
+      if (names.length) {
+        const s = albumStats(names, this.cullingIn ? await this.cullingIn(node.uri.fsPath).catch(() => new Map()) : new Map());
+        const plural = (n: number, one: string, many = one + 's') => `${n.toLocaleString()} ${n === 1 ? one : many}`;
+        const kinds = ([[s.raw, 'RAW'], [s.jpeg, 'JPEG'], [s.other, 'other']] as const).filter(([n]) => n > 0);
+        const kindText =
+          kinds.length > 1 ? ` — ${kinds.map(([n, k]) => `${n.toLocaleString()} ${k}`).join(', ')}` : kinds.length && kinds[0][1] !== 'other' ? `, all ${kinds[0][1]}` : '';
+        const lines = [
+          `$(file-media) ${plural(s.photos, 'photo')}${kindText}`,
+          [`$(check) ${plural(s.picks, 'pick')}`, `$(close) ${plural(s.rejects, 'reject')}`, `$(circle-large-outline) ${s.toCull.toLocaleString()} to cull`].join(' · '),
+        ];
+        const extra = [
+          s.rated && `$(star-full) ${s.rated.toLocaleString()} with stars`,
+          s.edited && `$(edit) ${s.edited.toLocaleString()} edited`,
+          s.autoRanked && `$(sparkle) ${s.autoRanked.toLocaleString()} auto-ranked`,
+        ].filter(Boolean);
+        if (extra.length) lines.push(extra.join(' · '));
+        md.appendMarkdown(lines.join('  \n') + '\n\n');
+      }
+      if (listing.folders.length) {
+        md.appendMarkdown(`$(folder) ${listing.folders.length.toLocaleString()} ${listing.folders.length === 1 ? 'folder' : 'folders'} inside\n\n`);
+      }
+    } catch {
+      md.appendMarkdown('$(warning) Can\'t read this folder right now\n\n');
+    }
+    md.appendMarkdown(`_${escapeMd(node.uri.fsPath)}_`);
+    item.tooltip = md;
     return item;
   }
 
@@ -179,8 +218,7 @@ export class LibraryTree implements vscode.TreeDataProvider<TreeNode>, vscode.Tr
     await mapLimit(missing, 4, async (c) => {
       try {
         const listing = await this.store.listing(c.uri);
-        const picks = this.picksIn ? await this.picksIn(c.uri.fsPath).catch(() => 0) : 0;
-        this.info.set(c.uri.fsPath, { photos: listing.photos.length, subfolders: listing.folders.length, picks });
+        this.info.set(c.uri.fsPath, { photos: listing.photos.length, subfolders: listing.folders.length });
         this.changed.fire(c);
       } catch {
         /* unreadable folder: keep it expandable, no count */
@@ -222,4 +260,9 @@ export class LibraryTree implements vscode.TreeDataProvider<TreeNode>, vscode.Tr
       await this.onDropFiles(files, target.uri);
     }
   }
+}
+
+/** Text shown as-is in a Markdown hover: no formatting, links or $(icons) from a folder's name. */
+export function escapeMd(text: string): string {
+  return text.replace(/[\\`*_{}[\]()<>#+\-.!|$~]/g, '\\$&');
 }

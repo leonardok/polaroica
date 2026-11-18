@@ -26,7 +26,8 @@ can already reach.
   (`0`–`5`), in the grid (on the selection) or in the photo tab's rating bar (with optional
   **Auto-advance** to the next photo). The grid's filter bar shows All / Picks / Unflagged /
   Rejects with counts, can **hide rejects** and filter by stars; rejects are washed out. Albums in
-  the sidebar show their pick count. Ratings live in the same `.sidecar/<photo>.xmp`
+  the sidebar show their photo count; hover one for picks, rejects, photos still to cull, stars,
+  edits and RAW/JPEG counts. Ratings live in the same `.sidecar/<photo>.xmp`
   (`xmp:Rating`); flagging never moves or deletes anything.
 - **Delete rejects**: the grid's **Delete N rejects…** button (or right-click an album →
   **Delete Rejected Photos…**) deletes an album's rejected photos from disk, with their sidecars,
