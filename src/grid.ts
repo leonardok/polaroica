@@ -8,6 +8,7 @@ import { Photo, PhotoStore, sortSetting } from './photoStore';
 import { Thumb } from './core/cache';
 import { ThumbJob, ThumbService } from './thumbs';
 import { EditStore } from './edits';
+import { PhotoExporter } from './export';
 import { fromWire, localRoots, post, webviewHtml } from './webview';
 import * as fs from 'fs';
 import { FaceModels } from './faceModel';
@@ -25,6 +26,8 @@ type FromGrid =
   | { type: 'rate'; names: string[]; rating?: number; flag?: 'pick' | 'reject' | null }
   | { type: 'autoRank' }
   | { type: 'undoAutoRank' }
+  | { type: 'deleteRejected' }
+  | { type: 'export' }
   | { type: 'makeBest'; name: string }
   | { type: 'facesResult'; id: number; faces?: FaceMetric[]; error?: string }
   | { type: 'onscreen'; names: string[] }
@@ -36,6 +39,8 @@ export interface GridHost {
   autoRank?(folder: vscode.Uri): void;
   undoAutoRank?(folder: vscode.Uri): void;
   makeBest?(folder: vscode.Uri, name: string): void;
+  deleteRejected?(folder: vscode.Uri): void;
+  exportPhotos?(folder: vscode.Uri, selected: string[]): void;
 }
 
 /** One editor tab per folder showing its photos as a grid (the library view). */
@@ -43,6 +48,8 @@ export class GridPanels implements vscode.Disposable {
   private readonly panels = new Map<string, GridPanel>();
   private readonly status: vscode.StatusBarItem;
   private host?: GridHost;
+  /** Export (right-click → Export…), set by the extension. */
+  exporter?: PhotoExporter;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -122,7 +129,7 @@ export class GridPanels implements vscode.Disposable {
   }
 
   /** Right-click menu on a photo in the active grid: acts on the selection when it holds the photo. */
-  async contextAction(action: 'move' | 'reveal', name: string | undefined): Promise<void> {
+  async contextAction(action: 'move' | 'reveal' | 'export', name: string | undefined): Promise<void> {
     const grid = [...this.panels.values()].find((p) => p.panel.active);
     if (!grid || !name) {
       return;
@@ -130,6 +137,9 @@ export class GridPanels implements vscode.Disposable {
     const uriOf = (n: string) => vscode.Uri.file(path.join(grid.folder.fsPath, n));
     if (action === 'reveal') {
       await vscode.commands.executeCommand('revealFileInOS', uriOf(name));
+    } else if (action === 'export') {
+      const names = grid.selected.includes(name) ? grid.selected : [name];
+      await this.exporter?.exportPhotos(names.map(uriOf), grid.folder);
     } else {
       const names = grid.selected.includes(name) ? grid.selected : [name];
       await this.mover.moveWithPicker(names.map(uriOf));
@@ -428,6 +438,12 @@ class GridPanel {
         break;
       case 'undoAutoRank':
         host?.undoAutoRank?.(this.folder);
+        break;
+      case 'deleteRejected':
+        host?.deleteRejected?.(this.folder);
+        break;
+      case 'export':
+        host?.exportPhotos?.(this.folder, this.selected);
         break;
       case 'facesResult': {
         const r = this.pendingFaces.get(m.id);

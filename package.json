@@ -2,9 +2,14 @@
   "name": "vsphoto",
   "displayName": "Photo Library",
   "description": "Browse and organize photo libraries — local folders and SMB network shares — inside VS Code.",
-  "version": "0.8.0",
+  "version": "0.8.3",
   "publisher": "leonardok",
   "license": "GPL-3.0-or-later",
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#11143a",
+    "theme": "dark"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/leonardok/vsphoto"
@@ -68,52 +73,68 @@
       {
         "command": "vsphoto.removeLibrary",
         "title": "Remove Library",
-        "category": "Photo Library"
+        "category": "Photo Library",
+        "icon": "$(close)"
       },
       {
         "command": "vsphoto.openFolder",
         "title": "Open Photos",
-        "category": "Photo Library"
+        "category": "Photo Library",
+        "icon": "$(file-media)"
       },
       {
         "command": "vsphoto.moveTo",
         "title": "Move to…",
-        "category": "Photo Library"
+        "category": "Photo Library",
+        "icon": "$(move)"
       },
       {
         "command": "vsphoto.newFolder",
         "title": "New Folder…",
-        "category": "Photo Library"
+        "category": "Photo Library",
+        "icon": "$(new-folder)"
       },
       {
         "command": "vsphoto.revealInOS",
         "title": "Reveal in OS",
-        "category": "Photo Library"
+        "category": "Photo Library",
+        "icon": "$(folder-opened)"
       },
       {
         "command": "vsphoto.cacheInfo",
         "title": "Show Cache Info",
-        "category": "Photo Library"
+        "category": "Photo Library",
+        "icon": "$(info)"
       },
       {
         "command": "vsphoto.buildThumbnails",
         "title": "Build All Thumbnails",
-        "category": "Photo Library"
+        "category": "Photo Library",
+        "icon": "$(run-all)"
       },
       {
         "command": "vsphoto.thumbnailProgress",
         "title": "Thumbnail Progress…",
-        "category": "Photo Library"
+        "category": "Photo Library",
+        "icon": "$(pulse)"
       },
       {
         "command": "vsphoto.photoMoveTo",
         "title": "Move to…",
-        "category": "Photo Library"
+        "category": "Photo Library",
+        "icon": "$(move)"
       },
       {
         "command": "vsphoto.photoReveal",
         "title": "Reveal in OS",
-        "category": "Photo Library"
+        "category": "Photo Library",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "vsphoto.photoExport",
+        "title": "Export to JPEG…",
+        "category": "Photo Library",
+        "icon": "$(export)"
       },
       {
         "command": "vsphoto.autoRank",
@@ -129,9 +150,22 @@
         "enablement": "vsphoto.canUndoAutoRank"
       },
       {
+        "command": "vsphoto.exportPhotos",
+        "title": "Export to JPEG…",
+        "category": "Photo Library",
+        "icon": "$(export)"
+      },
+      {
+        "command": "vsphoto.deleteRejected",
+        "title": "Delete Rejected Photos…",
+        "category": "Photo Library",
+        "icon": "$(trash)"
+      },
+      {
         "command": "vsphoto.showLog",
         "title": "Show Log",
-        "category": "Photo Library"
+        "category": "Photo Library",
+        "icon": "$(output)"
       }
     ],
     "menus": {
@@ -174,6 +208,16 @@
           "group": "2_edit@2"
         },
         {
+          "command": "vsphoto.exportPhotos",
+          "when": "view == vsphoto.libraries && viewItem =~ /^(library|folder)$/",
+          "group": "2_edit@3"
+        },
+        {
+          "command": "vsphoto.deleteRejected",
+          "when": "view == vsphoto.libraries && viewItem =~ /^(library|folder)$/",
+          "group": "2_edit@4"
+        },
+        {
           "command": "vsphoto.revealInOS",
           "when": "view == vsphoto.libraries && viewItem =~ /^(library|folder)$/",
           "group": "3_reveal@1"
@@ -212,6 +256,10 @@
         {
           "command": "vsphoto.photoReveal",
           "when": "false"
+        },
+        {
+          "command": "vsphoto.photoExport",
+          "when": "false"
         }
       ],
       "webview/context": [
@@ -222,6 +270,11 @@
         },
         {
           "command": "vsphoto.photoReveal",
+          "when": "(webviewId == 'vsphoto.grid' || webviewId == 'vsphoto.photo') && webviewSection == 'photo'",
+          "group": "1_photo@3"
+        },
+        {
+          "command": "vsphoto.photoExport",
           "when": "(webviewId == 'vsphoto.grid' || webviewId == 'vsphoto.photo') && webviewSection == 'photo'",
           "group": "1_photo@2"
         }
@@ -284,6 +337,13 @@
           "minimum": 0,
           "maximum": 600,
           "description": "Auto-Rank: photos taken up to this many seconds apart also stack together when they show the same scene and framing (same colours in the same places) — the same pose shot again after a short pause. 0 turns this off."
+        },
+        "vsphoto.export.quality": {
+          "type": "number",
+          "default": 90,
+          "minimum": 50,
+          "maximum": 100,
+          "description": "JPEG quality of exported photos (50–100). 90 keeps all visible detail; 95+ mostly makes files bigger."
         }
       }
     }
@@ -304,6 +364,7 @@
   "dependencies": {
     "@jsquash/jpeg": "1.6.0",
     "@jsquash/webp": "1.5.0",
-    "@mediapipe/tasks-vision": "1.2.3"
+    "@mediapipe/tasks-vision": "1.2.3",
+    "libraw-wasm": "1.6.0"
   }
 }

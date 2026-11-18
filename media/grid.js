@@ -273,6 +273,10 @@
       stack,
       h('span', { class: 'grow' }),
       h('span', { class: 'key-hint' }, 'P pick · X reject · U clear · 0–5 stars'),
+      h('button', { class: 'btn', title: 'Export photos of this album to JPEG (the selection, picks, by stars…), with your adjustments', onclick: () => post({ type: 'export' }) }, icon('export', 12), ' Export…'),
+      n.rejects
+        ? h('button', { class: 'btn', title: 'Delete the rejected photos of this album from disk (asks first; to the Trash when the drive has one)', onclick: () => post({ type: 'deleteRejected' }) }, icon('trash', 12), ` Delete ${n.rejects} reject${n.rejects === 1 ? '' : 's'}…`)
+        : null,
       h('button', { class: 'btn', title: 'Rate this album automatically (focus, exposure, similar shots)', onclick: () => post({ type: 'autoRank' }) }, icon('spark', 12), ' Auto-Rank…'),
     );
   }

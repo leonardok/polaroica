@@ -34,12 +34,14 @@
     refresh: 'M13 8a5 5 0 1 1-1.5-3.6M13 3v3h-3',
     left: 'M10 3L5 8l5 5',
     right: 'M6 3l5 5-5 5',
-    photo: 'M2 12l4-5 3 3.5 2-2 3 3.5z',
+    photo: 'M3.5 3h9A1.5 1.5 0 0 1 14 4.5v7a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5v-7A1.5 1.5 0 0 1 3.5 3zM3 12l3.5-4 2.5 3 1.5-1.5L13 12M10 6a1 1 0 1 0 2 0a1 1 0 1 0-2 0',
     undo: 'M5 6h5a3 3 0 0 1 0 6H7M7 3.5L4.5 6 7 8.5',
     check: 'M3 8.5l3 3 7-7',
     x: 'M4 4l8 8M12 4l-8 8',
-    spark: 'M8 0l1.8 6.2L16 8l-6.2 1.8L8 16l-1.8-6.2L0 8l6.2-1.8z',
+    spark: 'M8 1.5l1.6 4.9 4.9 1.6-4.9 1.6L8 14.5l-1.6-4.9L1.5 8l4.9-1.6z',
     redo: 'M11 6H6a3 3 0 0 0 0 6h3M9 3.5L11.5 6 9 8.5',
+    trash: 'M2.5 4h11M6 4V2.5h4V4M4 4l.7 9.5h6.6L12 4M6.5 6.5v5M9.5 6.5v5',
+    export: 'M8 10V2M5 5l3-3 3 3M3 9v4.5h10V9',
   };
   function icon(name, size) {
     const s = document.createElementNS(SVG_NS, 'svg');

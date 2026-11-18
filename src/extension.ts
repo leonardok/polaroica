@@ -3,6 +3,8 @@ import * as vscode from 'vscode';
 import { GridPanels } from './grid';
 import { Libraries } from './libraries';
 import { Mover } from './move';
+import { Deleter } from './delete';
+import { PhotoExporter } from './export';
 import { CacheManager } from './core/cache';
 import { disposeCodecs } from './core/codec';
 import { formatBytes } from './core/images';
@@ -26,8 +28,15 @@ export function activate(context: vscode.ExtensionContext): void {
   thumbs.log = (line) => output.appendLine(`[${new Date().toLocaleTimeString()}] ${line}`);
   const edits = new EditStore(cache);
   const mover = new Mover(context, libraries, store, edits);
+  const deleter = new Deleter(libraries, store, edits);
   const grids = new GridPanels(context, libraries, store, mover, thumbs, edits);
   const viewers = new PhotoViewers(context, libraries, store, mover, thumbs, edits);
+  const exporter = new PhotoExporter(context, libraries, store, edits, (line) =>
+    output.appendLine(`[${new Date().toLocaleTimeString()}] ${line}`),
+  );
+  exporter.openFolder = (folder) => grids.open(folder);
+  grids.exporter = exporter;
+  viewers.exporter = exporter;
   const ranker = new AutoRanker(
     context,
     store,
@@ -40,6 +49,8 @@ export function activate(context: vscode.ExtensionContext): void {
     autoRank: (folder) => void ranker.run(folder),
     undoAutoRank: (folder) => void ranker.undoRun(folder),
     makeBest: (folder, name) => void ranker.makeBest(folder, name),
+    deleteRejected: (folder) => void deleter.deleteRejected(folder),
+    exportPhotos: (folder, selected) => void exporter.exportFrom(folder, selected),
   });
   const background = new BackgroundThumbnails(libraries, store, thumbs, () => capMb() * 1024 * 1024, (photo, t) =>
     grids.offer(photo, t),
@@ -154,6 +165,22 @@ export function activate(context: vscode.ExtensionContext): void {
         void vscode.window.showInformationMessage('Right-click an album in Photo Libraries, or use the Auto-Rank button in a grid.');
       }
     }),
+    vscode.commands.registerCommand('vsphoto.deleteRejected', async (arg?: unknown) => {
+      const uri = uriOf(arg);
+      if (uri) {
+        await deleter.deleteRejected(uri);
+      } else {
+        void vscode.window.showInformationMessage('Right-click an album in Photo Libraries, or use the Delete Rejects button in a grid.');
+      }
+    }),
+    vscode.commands.registerCommand('vsphoto.exportPhotos', async (arg?: unknown) => {
+      const uri = uriOf(arg);
+      if (uri) {
+        await exporter.exportFrom(uri);
+      } else {
+        void vscode.window.showInformationMessage('Right-click an album in Photo Libraries, or use the Export button in a grid.');
+      }
+    }),
     vscode.commands.registerCommand('vsphoto.showLog', () => output.show()),
     vscode.commands.registerCommand('vsphoto.undoAutoRank', async (arg?: unknown) => {
       let uri = uriOf(arg);
@@ -227,14 +254,17 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     // Right-click menu inside the grid and photo tabs (webview/context). VS Code passes the
     // data-vscode-context of the clicked element: { webview, webviewSection, photo }.
-    ...(['move', 'reveal'] as const).map((action) =>
-      vscode.commands.registerCommand(action === 'move' ? 'vsphoto.photoMoveTo' : 'vsphoto.photoReveal', async (ctx?: { webview?: string; photo?: string }) => {
-        if (ctx?.webview === 'vsphoto.grid') {
-          await grids.contextAction(action, ctx.photo);
-        } else if (ctx?.webview === 'vsphoto.photo') {
-          await viewers.contextAction(action);
-        }
-      }),
+    ...(['move', 'reveal', 'export'] as const).map((action) =>
+      vscode.commands.registerCommand(
+        action === 'move' ? 'vsphoto.photoMoveTo' : action === 'reveal' ? 'vsphoto.photoReveal' : 'vsphoto.photoExport',
+        async (ctx?: { webview?: string; photo?: string }) => {
+          if (ctx?.webview === 'vsphoto.grid') {
+            await grids.contextAction(action, ctx.photo);
+          } else if (ctx?.webview === 'vsphoto.photo') {
+            await viewers.contextAction(action);
+          }
+        },
+      ),
     ),
     vscode.commands.registerCommand('vsphoto.revealInOS', async (arg?: unknown) => {
       const uri = uriOf(arg);

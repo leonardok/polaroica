@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- Marketplace icon source. media/icon.png is rendered from this file at 256×256. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2b2f6b"/>
+      <stop offset="1" stop-color="#11143a"/>
+    </linearGradient>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7cc4ff"/>
+      <stop offset="1" stop-color="#c9b6ff"/>
+    </linearGradient>
+    <clipPath id="frame"><rect x="58" y="70" width="140" height="110" rx="10"/></clipPath>
+  </defs>
+  <rect width="256" height="256" rx="48" fill="url(#bg)"/>
+  <!-- the stack behind: other photos of the album -->
+  <rect x="70" y="52" width="140" height="110" rx="10" fill="#ffffff" opacity=".18" transform="rotate(8 140 107)"/>
+  <rect x="64" y="60" width="140" height="110" rx="10" fill="#ffffff" opacity=".32" transform="rotate(4 134 115)"/>
+  <!-- the photo on top -->
+  <rect x="50" y="62" width="156" height="126" rx="14" fill="#ffffff"/>
+  <g clip-path="url(#frame)">
+    <rect x="58" y="70" width="140" height="110" fill="url(#sky)"/>
+    <circle cx="160" cy="102" r="13" fill="#fff6c8"/>
+    <path d="M58 180l44-56 30 36 18-20 48 40z" fill="#2b2f6b"/>
+    <path d="M102 124l30 36-12 20h-62z" fill="#3d4290"/>
+  </g>
+  <!-- Auto-Rank sparkle -->
+  <path d="M198 160l7 21 21 7-21 7-7 21-7-21-21-7 21-7z" fill="#ffd66b" stroke="#11143a" stroke-width="5" stroke-linejoin="round"/>
+</svg>

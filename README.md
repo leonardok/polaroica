@@ -26,7 +26,21 @@ can already reach.
   **Auto-advance** to the next photo). The grid's filter bar shows All / Picks / Unflagged /
   Rejects with counts, can **hide rejects** and filter by stars; rejects are washed out. Albums in
   the sidebar show their pick count. Ratings live in the same `.sidecar/<photo>.xmp`
-  (`xmp:Rating`); nothing is moved or deleted.
+  (`xmp:Rating`); flagging never moves or deletes anything.
+- **Delete rejects**: the grid's **Delete N rejects…** button (or right-click an album →
+  **Delete Rejected Photos…**) deletes an album's rejected photos from disk, with their sidecars,
+  after asking. They go to the Trash; on a drive without one (most network shares) it asks again
+  before deleting them permanently.
+- **Export to JPEG**: the grid's **Export…** button, right-click a photo (exports the selection)
+  or an album → **Export to JPEG…**. Choose which photos (selection, picks, 5 stars, 4+ stars,
+  everything but rejects, all), the size (full, 3840 or 2048 px long edge) and the folder (an
+  `Export` folder in the album, a recent one, or any folder). Your adjustments from the photo tab
+  are baked in and the photo is turned upright. **RAW files are developed at full sensor
+  resolution** with LibRaw (WebAssembly), with tones and colours matched to the camera's own
+  preview so the export looks like the camera JPEG (in-camera lens corrections are not applied).
+  Exports keep the camera, lens, exposure and date in EXIF, and carry an **embedded thumbnail and
+  a 1600 px preview** (MPF, like camera JPEGs), so browsing the export folder is instant.
+  Quality: `vsphoto.export.quality` (default 90). About 5 s per 24 MP RAW, two at a time.
 - **Auto-Rank** an album (right-click it in the sidebar, the grid's **Auto-Rank…** button, or the
   Command Palette): measures **focus** on the subject — inside the faces when there are people (so a sharp face in
   front of a blurred background scores high, and a missed focus on the face scores low), else the
@@ -145,7 +159,9 @@ npx @vscode/vsce package
 
 ## Known limitations / next steps
 
-- Grid thumbnails don't show edits yet, and there is no Export (a JPEG copy with the edits applied) yet.
+- Grid thumbnails don't show edits yet.
+- RAW export doesn't apply the camera's lens corrections (distortion, vignetting): RAW exports
+  frame slightly wider than the camera's own JPEG.
 - Auto-Rank's composition (framing) signal is designed (canvas page v1.2.0) but not built yet.
 - Dragging photos from the grid onto the tree uses the standard `text/uri-list` drag data; if your
   editor doesn't accept drops from webviews, use *Move to…*.
@@ -159,3 +175,6 @@ Copyright (C) 2026 leonardok
 This program is free software: you can redistribute it and/or modify it under the terms of the
 GNU General Public License as published by the Free Software Foundation, either version 3 of the
 License, or (at your option) any later version. See [`LICENSE`](LICENSE).
+
+RAW export uses [LibRaw](https://www.libraw.org/) (LGPL 2.1 / CDDL 1.0) through
+[libraw-wasm](https://github.com/ybouane/LibRaw-Wasm) (ISC).
