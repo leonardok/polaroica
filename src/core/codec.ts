@@ -122,10 +122,13 @@ export async function analyzeHere(jpeg: Uint8Array, opts: AnalyzeOptions = {}): 
   const { decode } = await codecs();
   const ab = jpeg.buffer.slice(jpeg.byteOffset, jpeg.byteOffset + jpeg.byteLength) as ArrayBuffer;
   const img = await decode.default(ab, { preserveOrientation: false });
-  const a = analyzePixels(downscale(img, 1024));
+  // Shrinking the full decode is the slow part (as slow as decoding), so do it once: to the face
+  // model's size when it's wanted, and the 1024 px measuring copy from that small image.
+  const big = downscale(img, Math.max(1024, opts.facePx ?? 0));
+  const a = analyzePixels(downscale(big, 1024));
   let pixels: Rgba | undefined;
   if (opts.facePx) {
-    const p = orient(downscale(img, opts.facePx), opts.orientation);
+    const p = orient(big, opts.orientation);
     // Own copy: small, and transferable to another thread without dragging the full decode along.
     pixels = { data: new Uint8Array(p.data), width: p.width, height: p.height };
   }
@@ -145,8 +148,13 @@ class Pool {
   private nextId = 1;
 
   constructor(size: number) {
+    this.grow(size);
+  }
+
+  /** Adds workers until there are `size` (never shrinks; idle workers cost only memory). */
+  grow(size: number): void {
     const file = path.join(__dirname, 'codecWorker.js');
-    for (let i = 0; i < size; i++) {
+    while (this.workers.length < size) {
       const w = new Worker(file);
       const slot = { w, busy: false };
       w.on('message', (m: { id: number; ok: boolean; thumb?: MadeThumb & { data: Uint8Array }; analysis?: unknown; error?: string }) => {
@@ -232,8 +240,16 @@ class Pool {
  * JPEG is the slow part when a photo has no built-in preview (e.g. Lightroom exports).
  */
 export function codecThreads(): number {
-  const cores = typeof os.availableParallelism === 'function' ? os.availableParallelism() : os.cpus().length;
-  return Math.max(2, Math.min(6, cores - 1));
+  return Math.max(2, Math.min(6, cpuCores() - 1));
+}
+
+export function cpuCores(): number {
+  return typeof os.availableParallelism === 'function' ? os.availableParallelism() : os.cpus().length;
+}
+
+/** Extra decoding threads for a job the person is waiting on (Auto-Rank): all the cores. */
+export function busyThreads(): number {
+  return Math.max(2, cpuCores());
 }
 
 let pool: Pool | undefined;
@@ -273,6 +289,7 @@ export async function analyzeJpeg(jpeg: Uint8Array, opts: AnalyzeOptions = {}): 
     }
   }
   if (pool) {
+    pool.grow(busyThreads());
     try {
       return await pool.analyze(jpeg, opts);
     } catch (err) {

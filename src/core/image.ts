@@ -41,12 +41,12 @@ export function downscale(src: Rgba, maxSide: number): Rgba {
     for (; y < yEnd; y += step) {
       rows++;
       let si = y * sw * 4;
+      // Colour only: decoded JPEGs are opaque, so alpha is set to 255 below instead of averaged.
       for (let x = 0; x < sw; x += step, si += 4 * step) {
         const ai = xMap[x];
         acc[ai] += s[si];
         acc[ai + 1] += s[si + 1];
         acc[ai + 2] += s[si + 2];
-        acc[ai + 3] += s[si + 3];
       }
     }
     const o = dy * dw * 4;
@@ -57,7 +57,7 @@ export function downscale(src: Rgba, maxSide: number): Rgba {
       out[o + ai] = acc[ai] / n;
       out[o + ai + 1] = acc[ai + 1] / n;
       out[o + ai + 2] = acc[ai + 2] / n;
-      out[o + ai + 3] = acc[ai + 3] / n;
+      out[o + ai + 3] = 255;
     }
   }
   return { data: out, width: dw, height: dh };

@@ -209,8 +209,8 @@ class GridPanel {
   private nextId = 1;
   private readonly pending = new Map<number, (t: Thumb | undefined) => void>();
   private readonly pendingFaces = new Map<number, (r: { faces?: FaceMetric[]; error?: string }) => void>();
-  /** The face models were handed to the page (sent once, as bytes: see detectFaces). */
-  private modelsSent = false;
+  /** The face models handed to the page (once per tab, as bytes: see detectFaces). */
+  private modelsSent?: Promise<void>;
   private markReady!: () => void;
   /** Resolves once the page's script listens for messages. */
   private readonly ready = new Promise<void>((r) => (this.markReady = r));
@@ -255,15 +255,23 @@ class GridPanel {
     await this.ready;
     // The models go to the page as bytes. Letting the page fetch them from the extension's
     // storage folder is refused by some VS Code builds (401) even when that folder is allowed.
+    // Several photos arrive at once: only the first carries the models, and the others are sent
+    // after it (messages reach the page in order).
     let modelBytes: { landmarker: Uint8Array; detector: Uint8Array } | undefined;
     if (!this.modelsSent) {
+      let markSent!: () => void;
+      this.modelsSent = new Promise<void>((r) => (markSent = r));
       try {
         const [landmarker, detector] = await Promise.all([fs.promises.readFile(models.landmarker), fs.promises.readFile(models.detector)]);
         modelBytes = { landmarker, detector };
-        this.modelsSent = true;
       } catch (err) {
+        this.modelsSent = undefined;
+        markSent();
         return { error: `could not read the face models: ${err instanceof Error ? err.message : String(err)}` };
       }
+      queueMicrotask(markSent); // after this call's post below
+    } else {
+      await this.modelsSent;
     }
     const w = this.panel.webview;
     const ext = this.owner.ctx.context.extensionUri;

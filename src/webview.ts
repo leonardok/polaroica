@@ -38,7 +38,8 @@ export function webviewHtml(
     `style-src 'nonce-${n}'`,
     // The face model (MediaPipe, WebAssembly) loads its own scripts and files from the extension.
     opts.faces ? `script-src 'nonce-${n}' ${webview.cspSource} 'wasm-unsafe-eval'` : `script-src 'nonce-${n}'`,
-    ...(opts.faces ? [`connect-src ${webview.cspSource}`] : []),
+    // Workers (blob:) read faces in parallel; they load the same library from the extension.
+    ...(opts.faces ? [`connect-src ${webview.cspSource}`, 'worker-src blob:'] : []),
   ].join('; ');
   // A literal "</" inside inlined code would end the tag early.
   const safe = (s: string) => s.replace(/<\/(script|style)/gi, '<\\/$1');

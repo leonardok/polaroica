@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { Analysis } from './core/analyze';
 import { Rgba } from './core/image';
-import { analyzeJpeg, codecThreads } from './core/codec';
+import { analyzeJpeg, busyThreads } from './core/codec';
 import { captureTime, embeddedPreviews, isBrowserJpeg, mpfPreviews, readExif } from './core/exif';
 import { extensionOf, isRaw } from './core/images';
 import { FaceMetric, PeopleSignal, rankAlbum, RankInput, RankOptions } from './core/rank';
@@ -97,40 +97,71 @@ export class AutoRanker {
         let faceFails = 0;
         let firstError: string | undefined;
         const step = 100 / photos.length;
-        await mapLimit(photos, codecThreads(), async (p) => {
+        const finish = () => {
+          doneCount++;
+          progress.report({ increment: step, message: `analysing ${doneCount} of ${photos.length}` });
+        };
+        // Two stages that overlap: reading + decoding on every core (a couple more slots than
+        // cores so the next files are already coming off the share), and the face model, which
+        // takes one photo at a time, behind it. A decode never waits for faces; only the number
+        // of decoded photos waiting for faces is capped (each holds a 1600 px image, ~7 MB).
+        const threads = busyThreads();
+        const faceJobs: Promise<void>[] = [];
+        let waiting = 0;
+        const wakeups: Array<() => void> = [];
+        const room = async () => {
+          while (waiting >= threads * 2) await new Promise<void>((r) => wakeups.push(r));
+          waiting++;
+        };
+        const leave = () => {
+          waiting--;
+          wakeups.shift()?.();
+        };
+        const measureFaces = async (p: Photo, pixels: Rgba, base: Stored) => {
+          try {
+            if (token.isCancellationRequested) return;
+            faceRuns++;
+            const r = await this.faces(folder, pixels, model!).catch((err) => ({ faces: undefined, error: String(err) }));
+            if (r.faces) {
+              stored.set(p.name, { ...base, faces: r.faces, facesV: FACES_V });
+              this.log(`Auto-Rank: ${p.name}: ${r.faces.length} face(s) ${JSON.stringify(r.faces)}`);
+            } else {
+              faceFails++;
+              firstError ??= r.error ?? 'no answer from the grid tab';
+              this.log(`Auto-Rank: face model failed on ${p.name}: ${r.error ?? 'no answer from the grid tab'}`);
+            }
+          } finally {
+            leave();
+            finish();
+          }
+        };
+        await mapLimit(photos, threads + 2, async (p) => {
           if (token.isCancellationRequested) {
             return;
           }
           const prev = stored.get(p.name);
           const fresh = prev && prev.size === p.size && prev.mtime === p.mtime;
           if (!fresh || (model && prev.facesV !== FACES_V)) {
+            if (model) await room();
             const a = await this.analyze(p, model ? FACE_PX : 0).catch((err) => {
               this.log(`Auto-Rank: could not read ${p.name}: ${err instanceof Error ? err.message : String(err)}`);
               return undefined;
             });
             if (a) {
               const { pixels, ...m } = a;
-              let faces = fresh && prev.facesV === FACES_V ? prev.faces : undefined;
-              let facesV = faces ? FACES_V : undefined;
-              if (model && pixels && !token.isCancellationRequested) {
-                faceRuns++;
-                const r = await this.faces(folder, pixels, model).catch((err) => ({ faces: undefined, error: String(err) }));
-                if (r.faces) {
-                  faces = r.faces;
-                  facesV = FACES_V;
-                  this.log(`Auto-Rank: ${p.name}: ${r.faces.length} face(s) ${JSON.stringify(r.faces)}`);
-                } else {
-                  faceFails++;
-                  firstError ??= r.error ?? 'no answer from the grid tab';
-                  this.log(`Auto-Rank: face model failed on ${p.name}: ${r.error ?? 'no answer from the grid tab'}`);
-                }
+              const keep = fresh && prev.facesV === FACES_V;
+              const base: Stored = { ...m, faces: keep ? prev.faces : undefined, facesV: keep ? FACES_V : undefined, size: p.size, mtime: p.mtime };
+              stored.set(p.name, base);
+              if (model && pixels) {
+                faceJobs.push(measureFaces(p, pixels, base));
+                return; // counted when its faces are done
               }
-              stored.set(p.name, { ...m, faces, facesV, size: p.size, mtime: p.mtime });
             }
+            if (model) leave();
           }
-          doneCount++;
-          progress.report({ increment: step, message: `analysing ${doneCount} of ${photos.length}` });
+          finish();
         });
+        await Promise.all(faceJobs);
         if (faceFails) {
           const ok = faceRuns - faceFails;
           void vscode.window

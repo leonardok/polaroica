@@ -44,6 +44,10 @@ can already reach.
   the worst blink most; small background faces are ignored. The models (4.8 MB) ship with the
   extension ([`models/`](models), Apache-2.0); they run on your computer in the grid tab and your
   photos are never uploaded. Problems are logged in **Photo Library: Show Log**.
+- Auto-Rank uses all CPU cores while it runs: photos are read and decoded on every core (the next
+  files are read ahead from the share), and faces are read by several copies of the face models
+  at once, while decoding carries on. Measurements are cached, so ranking an album again, or with
+  other options, only measures what changed.
 - **Right-click** a photo (grid or photo tab) for **Move to…** and **Reveal in OS**.
 - **Move**: *Move to…* from the grid, a photo tab, or a folder's context menu walks your libraries
   folder by folder (with recent destinations and *New folder…*). Folders can also be dragged onto
