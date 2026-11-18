@@ -35,6 +35,8 @@
     left: 'M10 3L5 8l5 5',
     right: 'M6 3l5 5-5 5',
     photo: 'M2 12l4-5 3 3.5 2-2 3 3.5z',
+    undo: 'M5 6h5a3 3 0 0 1 0 6H7M7 3.5L4.5 6 7 8.5',
+    redo: 'M11 6H6a3 3 0 0 0 0 6h3M9 3.5L11.5 6 9 8.5',
   };
   function icon(name, size) {
     const s = document.createElementNS(SVG_NS, 'svg');

@@ -29,7 +29,7 @@ function asset(extensionUri: vscode.Uri, file: string): string {
 export function webviewHtml(
   webview: vscode.Webview,
   extensionUri: vscode.Uri,
-  opts: { title: string; script: string; style: string; body: string },
+  opts: { title: string; script: string | string[]; style: string; body: string },
 ): string {
   const n = nonce();
   const csp = [
@@ -53,7 +53,7 @@ ${safe(asset(extensionUri, opts.style))}</style>
 <body data-vscode-context='{"preventDefaultContextMenuItems": true}'>
 ${opts.body}
 <script nonce="${n}">${safe(asset(extensionUri, 'common.js'))}</script>
-<script nonce="${n}">${safe(asset(extensionUri, opts.script))}</script>
+${(Array.isArray(opts.script) ? opts.script : [opts.script]).map((f) => `<script nonce="${n}">${safe(asset(extensionUri, f))}</script>`).join('\n')}
 </body>
 </html>`;
 }

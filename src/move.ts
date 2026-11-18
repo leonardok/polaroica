@@ -5,6 +5,7 @@ import { nextFreeName } from './core/images';
 import { Libraries } from './libraries';
 import { PhotoStore } from './photoStore';
 import { thumbPx } from './thumbs';
+import { EditStore } from './edits';
 
 const RECENT_TARGETS = 'vsphoto.recentMoveTargets';
 
@@ -21,6 +22,7 @@ export class Mover {
     private readonly context: vscode.ExtensionContext,
     private readonly libraries: Libraries,
     private readonly store: PhotoStore,
+    private readonly edits?: EditStore,
   ) {}
 
   /** "Move to…": pick a destination, then move. */
@@ -95,6 +97,8 @@ export class Mover {
             result.moved.push({ from: src, to: dest });
             if (before?.isFile()) {
               await this.carryThumbnail(src, dest, before);
+              // The photo's edits (.sidecar/<name>.xmp) go with it.
+              await this.edits?.carry(src, dest).catch(() => undefined);
             }
           } catch (err) {
             result.skipped.push(src);

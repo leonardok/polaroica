@@ -8,6 +8,7 @@ import { disposeCodecs } from './core/codec';
 import { formatBytes } from './core/images';
 import { PhotoStore } from './photoStore';
 import { ThumbService } from './thumbs';
+import { EditStore } from './edits';
 import { BackgroundThumbnails } from './background';
 import { FolderNode, LibraryNode, LibraryTree, TreeNode } from './tree';
 import { PhotoViewers } from './viewer';
@@ -19,9 +20,10 @@ export function activate(context: vscode.ExtensionContext): void {
   const cache = new CacheManager(cacheDir, capMb() * 1024 * 1024);
   const store = new PhotoStore(cache);
   const thumbs = new ThumbService(store);
-  const mover = new Mover(context, libraries, store);
-  const grids = new GridPanels(context, libraries, store, mover, thumbs);
-  const viewers = new PhotoViewers(context, libraries, store, mover, thumbs);
+  const edits = new EditStore();
+  const mover = new Mover(context, libraries, store, edits);
+  const grids = new GridPanels(context, libraries, store, mover, thumbs, edits);
+  const viewers = new PhotoViewers(context, libraries, store, mover, thumbs, edits);
   grids.setHost({ openPhoto: (folder, name, sort) => viewers.open(folder, name, sort) });
   const background = new BackgroundThumbnails(libraries, store, thumbs, () => capMb() * 1024 * 1024, (photo, t) =>
     grids.offer(photo, t),
@@ -71,6 +73,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     store,
+    edits,
     grids,
     viewers,
     view,

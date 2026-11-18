@@ -14,10 +14,18 @@ can already reach.
 - **Photo tabs**: double-click a photo (or press Enter) to open it **in its own tab**. Opening a
   photo that is already open focuses its tab. In a photo tab, **← →** go to the previous / next
   photo, the filmstrip jumps to a neighbour, and a double-click goes back to the grid.
+- **Adjust** (photo tab, collapsible **ADJUST** section): histogram; Exposure, Contrast,
+  Highlights, Shadows, Whites, Blacks; a tone curve (RGB, R, G, B: click to add a point, drag,
+  double-click to remove); Temperature, Tint, Vibrance, Saturation. Drawn live with WebGL.
+  **Before / After** (or hold `\`), undo / redo (Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z), Reset, Copy
+  Settings / Paste. Edits are **non-destructive**: they are saved to
+  `.sidecar/<photo name>.xmp` in the photo's folder (hidden from the library) and the photo file is
+  never changed. Edited photos show an orange dot in the grid and filmstrip.
+- **Right-click** a photo (grid or photo tab) for **Move to…** and **Reveal in OS**.
 - **Move**: *Move to…* from the grid, a photo tab, or a folder's context menu walks your libraries
   folder by folder (with recent destinations and *New folder…*). Folders can also be dragged onto
   other folders in the tree. Moves between libraries copy, verify the size, then delete the
-  original. Name clashes ask: Keep Both / Skip.
+  original. Name clashes ask: Keep Both / Skip. A photo's edits (`.sidecar/…xmp`) move with it.
 
 Design: see [`docs/design`](docs/design) (design page v1.0.0).
 
@@ -102,7 +110,7 @@ npx @vscode/vsce package
 
 ## Known limitations / next steps
 
-- Photo editing (Adjust panel) is designed (canvas page v1.1.0) but not built yet.
+- Grid thumbnails don't show edits yet, and there is no Export (a JPEG copy with the edits applied) yet.
 - Dragging photos from the grid onto the tree uses the standard `text/uri-list` drag data; if your
   editor doesn't accept drops from webviews, use *Move to…*.
 - File-change watching may not fire for every SMB server; use **Refresh** in the view title or

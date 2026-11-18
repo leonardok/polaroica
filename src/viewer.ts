@@ -8,6 +8,10 @@ import { Photo, PhotoStore } from './photoStore';
 import { isDisplayable, isRaw } from './core/images';
 import { rawPreview, ThumbService } from './thumbs';
 import { localRoots, post, webviewHtml } from './webview';
+import * as fs from 'fs';
+import { EditStore } from './edits';
+import { normalizeEdits } from './core/xmp';
+import { mimeOf } from './thumbs';
 
 type FromViewer =
   | { type: 'ready' }
@@ -15,7 +19,11 @@ type FromViewer =
   | { type: 'goto'; index: number }
   | { type: 'grid' }
   | { type: 'move' }
-  | { type: 'reveal' };
+  | { type: 'reveal' }
+  | { type: 'needBytes'; name: string }
+  | { type: 'saveEdits'; name: string; edits: unknown }
+  | { type: 'copyEdits'; edits: unknown }
+  | { type: 'pasteEdits' };
 
 const STRIP_RADIUS = 6;
 
@@ -29,6 +37,7 @@ export class PhotoViewers implements vscode.Disposable {
     readonly store: PhotoStore,
     readonly mover: Mover,
     readonly thumbs: ThumbService,
+    readonly edits: EditStore,
   ) {
     context.subscriptions.push(
       store.onDidChange((folder) => {
@@ -103,7 +112,7 @@ class PhotoViewer {
   ) {
     panel.webview.html = webviewHtml(panel.webview, owner.context.extensionUri, {
       title: name,
-      script: 'viewer.js',
+      script: ['adjust.js', 'viewer.js'],
       style: 'viewer.css',
       body: '<div id="app"></div>',
     });
@@ -164,6 +173,13 @@ class PhotoViewer {
     }
     const view = toView(webview, photo);
     const raw = isRaw(photo.name);
+    const [edits, editedNames] = await Promise.all([
+      this.owner.edits.load(photo.uri),
+      this.owner.edits.editedIn(this.folder.fsPath),
+    ]);
+    if (this.current !== photo) {
+      return;
+    }
     const neighbours = [this.photos[this.index + 1], this.photos[this.index - 1]]
       .filter((p): p is Photo => !!p && isDisplayable(p.name))
       .map((p) => webview.asWebviewUri(p.uri).toString());
@@ -182,8 +198,11 @@ class PhotoViewer {
         name: p.name,
         ext: toView(webview, p).ext,
         thumb: cached.get(p.name)?.data,
+        edited: editedNames.has(p.name),
       })),
       preload: neighbours,
+      edits,
+      canPaste: !!this.owner.edits.clipboard,
     });
 
     const work: Promise<unknown>[] = [
@@ -232,6 +251,40 @@ class PhotoViewer {
         break;
       case 'grid':
         await vscode.commands.executeCommand('vsphoto.openFolder', this.folder);
+        break;
+      case 'needBytes': {
+        // The editor renders with WebGL from the photo's bytes (a blob, so the canvas is never
+        // "tainted" by a cross-origin image).
+        const photo = this.current;
+        if (!photo || photo.name !== m.name) {
+          break;
+        }
+        const data = isRaw(photo.name)
+          ? await rawPreview(photo.uri.fsPath)
+          : await fs.promises.readFile(photo.uri.fsPath).catch(() => undefined);
+        if (this.current === photo) {
+          void post(this.panel.webview, { type: 'bytes', name: photo.name, data, mime: isRaw(photo.name) ? 'image/jpeg' : mimeOf(photo.name) });
+        }
+        break;
+      }
+      case 'saveEdits': {
+        const photo = this.photos.find((p) => p.name === m.name);
+        if (photo) {
+          try {
+            await this.owner.edits.save(photo.uri, normalizeEdits(m.edits));
+          } catch (err) {
+            void vscode.window.showErrorMessage(`Could not save edits for ${photo.name}: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+        break;
+      }
+      case 'copyEdits':
+        this.owner.edits.clipboard = normalizeEdits(m.edits);
+        break;
+      case 'pasteEdits':
+        if (this.owner.edits.clipboard) {
+          void post(this.panel.webview, { type: 'paste', edits: this.owner.edits.clipboard });
+        }
         break;
       case 'move':
         if (this.current) {

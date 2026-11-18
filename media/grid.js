@@ -239,6 +239,7 @@
         ),
         h('span', { class: 'label' }, p.name),
       );
+      tile.classList.toggle('edited', !!p.edited);
       tileByName.set(p.name, tile);
       applyThumb(tile, p.name);
       observer.observe(tile);
@@ -344,6 +345,15 @@
       case 'decode':
         void decode(m);
         break;
+      case 'edited': {
+        const tile = tileByName.get(m.name);
+        tile?.classList.toggle('edited', !!m.edited);
+        const ph = photos.find((p) => p.name === m.name);
+        if (ph) {
+          ph.edited = !!m.edited;
+        }
+        break;
+      }
       case 'details':
         if (detailsEl) {
           renderDetails(m.details);

@@ -7,6 +7,7 @@ import { Mover } from './move';
 import { Photo, PhotoStore, sortSetting } from './photoStore';
 import { Thumb } from './core/cache';
 import { ThumbJob, ThumbService } from './thumbs';
+import { EditStore } from './edits';
 import { fromWire, localRoots, post, webviewHtml } from './webview';
 
 type FromGrid =
@@ -37,6 +38,7 @@ export class GridPanels implements vscode.Disposable {
     private readonly store: PhotoStore,
     private readonly mover: Mover,
     private readonly thumbs: ThumbService,
+    private readonly edits?: EditStore,
   ) {
     this.status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
     context.subscriptions.push(
@@ -47,6 +49,18 @@ export class GridPanels implements vscode.Disposable {
           }
         }
       }),
+      ...(edits
+        ? [
+            edits.onDidChange((photo) => {
+              const grid = this.panels.get(path.dirname(photo.fsPath));
+              if (grid) {
+                void edits.editedIn(grid.folder.fsPath).then((names) =>
+                  post(grid.panel.webview, { type: 'edited', name: path.basename(photo.fsPath), edited: names.has(path.basename(photo.fsPath)) }),
+                );
+              }
+            }),
+          ]
+        : []),
       vscode.workspace.onDidChangeWorkspaceFolders(() => {
         for (const p of this.panels.values()) {
           p.panel.webview.options = { ...p.panel.webview.options, localResourceRoots: localRoots(context.extensionUri) };
@@ -138,7 +152,7 @@ export class GridPanels implements vscode.Disposable {
 
   // shared by panels
   get ctx() {
-    return { context: this.context, libraries: this.libraries, store: this.store, mover: this.mover, host: this.host, thumbs: this.thumbs };
+    return { context: this.context, libraries: this.libraries, store: this.store, mover: this.mover, host: this.host, thumbs: this.thumbs, edits: this.edits };
   }
 
   dispose(): void {
@@ -215,13 +229,14 @@ class GridPanel {
     const names = new Set(this.photos.map((p) => p.name));
     this.selected = this.selected.filter((n) => names.has(n));
     const tileSize = this.owner.ctx.context.globalState.get<number>('vsphoto.tileSize', 160);
+    const editedNames = (await this.owner.ctx.edits?.editedIn(this.folder.fsPath)) ?? new Set<string>();
     void post(this.webview, {
       type: 'init',
       crumbs: libraries.crumbs(this.folder),
       sort: this.sort,
       tileSize,
       selected: this.selected,
-      photos: this.photos.map((p) => ({ ...toView(this.webview, p), src: undefined })),
+      photos: this.photos.map((p) => ({ ...toView(this.webview, p), src: undefined, edited: editedNames.has(p.name) })),
     });
     this.owner.updateStatus();
     this.job.setPhotos(this.photos);
