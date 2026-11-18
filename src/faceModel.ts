@@ -3,16 +3,42 @@ import * as https from 'https';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
-/** MediaPipe Face Landmarker (Apache-2.0), float16, ~3.7 MB. */
-export const FACE_MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
+/**
+ * MediaPipe models (Apache-2.0): a face detector (BlazeFace full range, 1.1 MB) finds every face,
+ * then Face Landmarker (3.7 MB) reads each one cropped on its own. Landmarker alone, with several
+ * people in one frame, misses faces, reports some twice and mixes up their expressions.
+ */
+const MODELS = {
+  landmarker: {
+    file: 'face_landmarker.task',
+    url: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
+    min: 1_000_000,
+  },
+  detector: {
+    file: 'blaze_face_full_range.tflite',
+    url: 'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_full_range/float16/1/blaze_face_full_range.tflite',
+    min: 500_000,
+  },
+};
+
+export interface FaceModels {
+  landmarker: string;
+  detector: string;
+}
 const CONSENT_KEY = 'vsphoto.faceModelConsent';
 
 export function modelsDir(context: vscode.ExtensionContext): vscode.Uri {
   return vscode.Uri.joinPath(context.globalStorageUri, 'models');
 }
 
-export function faceModelFile(context: vscode.ExtensionContext): string {
-  return path.join(modelsDir(context).fsPath, 'face_landmarker.task');
+function modelFiles(context: vscode.ExtensionContext): FaceModels {
+  const dir = modelsDir(context).fsPath;
+  return { landmarker: path.join(dir, MODELS.landmarker.file), detector: path.join(dir, MODELS.detector.file) };
+}
+
+async function have(file: string, min: number): Promise<boolean> {
+  const st = await fs.promises.stat(file).catch(() => undefined);
+  return !!st && st.size >= min;
 }
 
 /**
@@ -20,20 +46,24 @@ export function faceModelFile(context: vscode.ExtensionContext): string {
  * this computer: photos are never sent anywhere. Undefined when the person declines or the
  * download fails.
  */
-export async function ensureFaceModel(context: vscode.ExtensionContext): Promise<string | undefined> {
-  const file = faceModelFile(context);
-  const st = await fs.promises.stat(file).catch(() => undefined);
-  if (st && st.size > 1_000_000) {
-    return file;
+export async function ensureFaceModel(context: vscode.ExtensionContext): Promise<FaceModels | undefined> {
+  const files = modelFiles(context);
+  const need: Array<keyof typeof MODELS> = [];
+  for (const k of Object.keys(MODELS) as Array<keyof typeof MODELS>) {
+    if (!(await have(files[k], MODELS[k].min))) need.push(k);
   }
+  if (!need.length) {
+    return files;
+  }
+  const mb = need.reduce((a, k) => a + (k === 'landmarker' ? 3.7 : 1.1), 0).toFixed(1);
   if (!context.globalState.get<boolean>(CONSENT_KEY)) {
-    const ok = 'Download (3.7 MB)';
+    const ok = `Download (${mb} MB)`;
     const pick = await vscode.window.showInformationMessage(
       'Auto-Rank needs a face model to judge eyes, gaze and expressions.',
       {
         modal: true,
         detail:
-          'MediaPipe Face Landmarker (Google, Apache-2.0) is downloaded once from storage.googleapis.com. ' +
+          'MediaPipe face models (Google, Apache-2.0) are downloaded once from storage.googleapis.com. ' +
           'It runs on this computer; your photos are never uploaded.',
       },
       ok,
@@ -45,10 +75,12 @@ export async function ensureFaceModel(context: vscode.ExtensionContext): Promise
   }
   try {
     await vscode.window.withProgress(
-      { location: vscode.ProgressLocation.Notification, title: 'Downloading the face model (3.7 MB)…' },
-      () => download(FACE_MODEL_URL, file),
+      { location: vscode.ProgressLocation.Notification, title: `Downloading the face models (${mb} MB)…` },
+      async () => {
+        for (const k of need) await download(MODELS[k].url, files[k]);
+      },
     );
-    return file;
+    return files;
   } catch (err) {
     void vscode.window.showErrorMessage(`Could not download the face model: ${err instanceof Error ? err.message : String(err)}`);
     return undefined;

@@ -9,7 +9,7 @@ import { Thumb } from './core/cache';
 import { ThumbJob, ThumbService } from './thumbs';
 import { EditStore } from './edits';
 import { fromWire, localRoots, post, webviewHtml } from './webview';
-import { modelsDir } from './faceModel';
+import { FaceModels, modelsDir } from './faceModel';
 import { FaceMetric } from './core/rank';
 import { Rgba } from './core/image';
 
@@ -136,12 +136,12 @@ export class GridPanels implements vscode.Disposable {
   }
 
   /** Face metrics for a photo, via the grid tab of its folder (opened if needed). */
-  async detectFaces(folder: vscode.Uri, pixels: Rgba, modelFile: string): Promise<{ faces?: FaceMetric[]; error?: string }> {
+  async detectFaces(folder: vscode.Uri, pixels: Rgba, models: FaceModels): Promise<{ faces?: FaceMetric[]; error?: string }> {
     if (!this.panels.get(folder.fsPath)) {
       this.open(folder);
     }
     const grid = this.panels.get(folder.fsPath);
-    return grid ? grid.detectFaces(pixels, modelFile) : { error: 'the grid tab could not be opened' };
+    return grid ? grid.detectFaces(pixels, models) : { error: 'the grid tab could not be opened' };
   }
 
   /** A thumbnail made by the background builder: show it in an open grid of its folder. */
@@ -248,7 +248,7 @@ class GridPanel {
   }
 
   /** Runs the face model on a photo in this tab (MediaPipe needs a browser page). */
-  async detectFaces(pixels: Rgba, modelFile: string): Promise<{ faces?: FaceMetric[]; error?: string }> {
+  async detectFaces(pixels: Rgba, models: FaceModels): Promise<{ faces?: FaceMetric[]; error?: string }> {
     await this.ready;
     const w = this.panel.webview;
     const ext = this.owner.ctx.context.extensionUri;
@@ -272,7 +272,8 @@ class GridPanel {
         runtime: {
           bundle: w.asWebviewUri(vscode.Uri.joinPath(mp, 'vision_bundle.js')).toString(),
           wasm: w.asWebviewUri(vscode.Uri.joinPath(mp, 'wasm')).toString(),
-          model: w.asWebviewUri(vscode.Uri.file(modelFile)).toString(),
+          model: w.asWebviewUri(vscode.Uri.file(models.landmarker)).toString(),
+          detector: w.asWebviewUri(vscode.Uri.file(models.detector)).toString(),
         },
       });
     });

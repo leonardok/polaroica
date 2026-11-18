@@ -7,7 +7,7 @@ import { analyzeJpeg, codecThreads } from './core/codec';
 import { captureTime, embeddedPreviews, isBrowserJpeg, mpfPreviews, readExif } from './core/exif';
 import { extensionOf, isRaw } from './core/images';
 import { FaceMetric, PeopleSignal, rankAlbum, RankInput, RankOptions } from './core/rank';
-import { ensureFaceModel } from './faceModel';
+import { ensureFaceModel, FaceModels } from './faceModel';
 import { emptySidecar, Sidecar } from './core/xmp';
 import { EditStore } from './edits';
 import { mapLimit, Photo, PhotoStore, readHead, readRange } from './photoStore';
@@ -21,7 +21,12 @@ interface Stored extends Analysis {
   time?: number;
   /** Faces found by the face model; absent until a run used it. */
   faces?: FaceMetric[];
+  /** How the faces were measured; older results are measured again. */
+  facesV?: number;
 }
+
+/** 2: face detector first, then each face read on its own crop. */
+const FACES_V = 2;
 
 const PEOPLE: PeopleSignal[] = ['eyes', 'looking', 'smile', 'natural'];
 type Choice = 'focus' | 'exposure' | 'similar' | 'people' | PeopleSignal | 'keepMine' | 'reject';
@@ -30,7 +35,7 @@ type Choice = 'focus' | 'exposure' | 'similar' | 'people' | PeopleSignal | 'keep
 const FACE_PX = 1600;
 
 /** Measures faces in a photo (upright RGBA pixels). */
-export type FaceDetector = (folder: vscode.Uri, pixels: Rgba, modelFile: string) => Promise<{ faces?: FaceMetric[]; error?: string }>;
+export type FaceDetector = (folder: vscode.Uri, pixels: Rgba, models: FaceModels) => Promise<{ faces?: FaceMetric[]; error?: string }>;
 
 /**
  * Auto-Rank an album: measure each photo (focus, blown highlights, a look-alike hash, capture
@@ -69,7 +74,7 @@ export class AutoRanker {
       burstSeconds: vscode.workspace.getConfiguration('vsphoto').get<number>('autoRank.burstSeconds', 2),
       people: PEOPLE.filter((k) => choices.has(k)),
     };
-    let model: string | undefined;
+    let model: FaceModels | undefined;
     if (opts.people!.length) {
       model = await ensureFaceModel(this.context);
       if (!model) {
@@ -98,19 +103,21 @@ export class AutoRanker {
           }
           const prev = stored.get(p.name);
           const fresh = prev && prev.size === p.size && prev.mtime === p.mtime;
-          if (!fresh || (model && !prev.faces)) {
+          if (!fresh || (model && prev.facesV !== FACES_V)) {
             const a = await this.analyze(p, model ? FACE_PX : 0).catch((err) => {
               this.log(`Auto-Rank: could not read ${p.name}: ${err instanceof Error ? err.message : String(err)}`);
               return undefined;
             });
             if (a) {
               const { pixels, ...m } = a;
-              let faces = fresh ? prev.faces : undefined;
+              let faces = fresh && prev.facesV === FACES_V ? prev.faces : undefined;
+              let facesV = faces ? FACES_V : undefined;
               if (model && pixels && !token.isCancellationRequested) {
                 faceRuns++;
                 const r = await this.faces(folder, pixels, model).catch((err) => ({ faces: undefined, error: String(err) }));
                 if (r.faces) {
                   faces = r.faces;
+                  facesV = FACES_V;
                   this.log(`Auto-Rank: ${p.name}: ${r.faces.length} face(s) ${JSON.stringify(r.faces)}`);
                 } else {
                   faceFails++;
@@ -118,7 +125,7 @@ export class AutoRanker {
                   this.log(`Auto-Rank: face model failed on ${p.name}: ${r.error ?? 'no answer from the grid tab'}`);
                 }
               }
-              stored.set(p.name, { ...m, faces, size: p.size, mtime: p.mtime });
+              stored.set(p.name, { ...m, faces, facesV, size: p.size, mtime: p.mtime });
             }
           }
           doneCount++;
@@ -308,7 +315,7 @@ export class AutoRanker {
       { id: 'focus', label: '$(eye) Focus', detail: 'Blurry or out-of-focus photos rank lower' },
       { id: 'exposure', label: '$(lightbulb) Washed-out highlights', detail: 'Photos with blown-out white areas rank lower' },
       { id: 'similar', label: '$(layers) Similar shots', detail: 'Group bursts and near-duplicates; the best of each group is picked' },
-      { id: 'people', label: '$(person) People', detail: 'Judge faces with a face model that runs on this computer (one-time 3.7 MB download)' },
+      { id: 'people', label: '$(person) People', detail: 'Judge faces with a face model that runs on this computer (one-time 4.8 MB download)' },
       { id: 'eyes', label: '$(blank)$(blank) Eyes open', description: 'nobody blinking' },
       { id: 'looking', label: '$(blank)$(blank) Looking at the camera', description: 'face and eyes towards the lens' },
       { id: 'smile', label: '$(blank)$(blank) Smiling' },
