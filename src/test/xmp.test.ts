@@ -45,3 +45,15 @@ test('rating, flag and Auto-Rank details live in the same sidecar as edits', asy
   // Files written before culling existed still read (no rating attribute).
   assert.equal(readSidecar(write(emptySidecar().edits)).rating, 0);
 });
+
+test('sidecars written before the rename (vsphoto: prefix) are still read', async () => {
+  const { readSidecar } = await import('../core/xmp');
+  const old = `<rdf:Description xmlns:vsphoto="https://github.com/leonardok/vsphoto/ns/1.0/"
+   xmp:Rating="4"
+   vsphoto:Flag="pick"
+   vsphoto:AutoRank="{&quot;focus&quot;:80}">`;
+  const sc = readSidecar(old);
+  assert.equal(sc.rating, 4);
+  assert.equal(sc.flag, 'pick');
+  assert.deepEqual(sc.auto, { focus: 80 });
+});

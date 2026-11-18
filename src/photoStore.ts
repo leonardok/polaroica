@@ -269,6 +269,6 @@ export async function isReachable(fsPath: string): Promise<boolean> {
 }
 
 export function sortSetting(): SortKey {
-  const v = vscode.workspace.getConfiguration('vsphoto').get<string>('sortBy', 'name');
+  const v = vscode.workspace.getConfiguration('polaroica').get<string>('sortBy', 'name');
   return v === 'modified' || v === 'size' ? v : 'name';
 }

@@ -1,4 +1,4 @@
-# vsphoto: Photo Library for VS Code
+# Polaroica: Photo Library for VS Code
 
 Browse and organize photo libraries inside VS Code. A **workspace is your photo collection**;
 every **library** is a workspace folder: a local folder or an SMB network share your computer
@@ -32,8 +32,8 @@ can already reach.
   front of a blurred background scores high, and a missed focus on the face scores low), else the
   sharpest part of the frame — on an absolute 0–100 scale,
   **washed-out highlights** (large blown-out areas) and **similar shots** (bursts: taken within
-  `vsphoto.autoRank.burstSeconds` and alike by a look-alike hash; and the same pose shot again
-  within `vsphoto.autoRank.sceneSeconds` (60 s) when the framing and colours match too), then sets stars, **picks the
+  `polaroica.autoRank.burstSeconds` and alike by a look-alike hash; and the same pose shot again
+  within `polaroica.autoRank.sceneSeconds` (60 s) when the framing and colours match too), then sets stars, **picks the
   best of each group of similar shots**, and stacks the groups in the grid. Shots within 5% of the
   best (up to two per group) are **kept**: never rejected, full stars, no flag. Photos you rated yourself
   are left alone; nothing is rejected unless you ask. Ratings it set carry a ✦ until you change them.
@@ -47,7 +47,7 @@ can already reach.
   camera wins, and a photo where someone's eyes are closed gets at most 3 stars. Group shots count
   the worst blink most; small background faces are ignored. The models (4.8 MB) ship with the
   extension ([`models/`](models), Apache-2.0); they run on your computer in the grid tab and your
-  photos are never uploaded. Problems are logged in **Photo Library: Show Log**.
+  photos are never uploaded. Problems are logged in **Polaroica: Show Log**.
 - Auto-Rank uses all CPU cores while it runs: photos are read and decoded on every core (the next
   files are read ahead from the share), and faces are read by several copies of the face models
   at once, while decoding carries on. Measurements are cached, so ranking an album again, or with
@@ -96,16 +96,16 @@ cache** on this computer (in VS Code's extension storage, never on the share):
   several photos at a time, so the editor stays responsive. JPEGs exported by Lightroom and similar
   apps have no built-in preview, so each needs one full read; **Thumbnail Progress… › Show Log**
   explains the first full reads of a session (which header segments the file has). The workers read the share gently, wait while you browse, skip what is already cached
-  (a restart continues where it stopped) and stop if the cache is full. **Photo Library: Thumbnail
+  (a restart continues where it stopped) and stop if the cache is full. **Polaroica: Thumbnail
   Progress…** shows the details and can pause, resume or stop; **Build All Thumbnails** starts a
-  run; `vsphoto.backgroundThumbnails` turns the automatic build off.
+  run; `polaroica.backgroundThumbnails` turns the automatic build off.
 - **Folder index**: file names, sizes, dates and EXIF. Folders and the tree's photo counts appear
   instantly from the index; the share is re-checked in the background.
 - **Photo tabs** show the cached thumbnail at once, scaled up, while the original streams in, then
   preload the previous and next photos. The filmstrip uses thumbnails.
 - **Moves** carry the cached thumbnail along, so it is not generated again.
-- Cache size is capped (`vsphoto.cacheSizeMB`, default 1 GB ≈ 200,000 photos); the least recently
-  viewed folders are removed first. **Photo Library: Show Cache Info** shows the size and the
+- Cache size is capped (`polaroica.cacheSizeMB`, default 1 GB ≈ 200,000 photos); the least recently
+  viewed folders are removed first. **Polaroica: Show Cache Info** shows the size and the
   average thumbnail size, and can clear it.
 
 ## Formats
@@ -118,13 +118,13 @@ display as a labelled placeholder for now.
 
 | Setting | Default | |
 | --- | --- | --- |
-| `vsphoto.sortBy` | `name` | Default order: `name`, `modified` or `size`. |
-| `vsphoto.showPhotoCounts` | `true` | Photo counts in the tree. |
-| `vsphoto.thumbnailSize` | `256` | Thumbnail long edge: 192, 256 or 320 px (≈ 4 / 6 / 9 KB each). |
-| `vsphoto.cacheSizeMB` | `1024` | Disk space for the local cache. |
-| `vsphoto.backgroundThumbnails` | `true` | Build thumbnails for the whole library in the background. |
-| `vsphoto.autoRank.burstSeconds` | `2` | Auto-Rank: max seconds between frames of one burst. |
-| `vsphoto.autoRank.sceneSeconds` | `60` | Auto-Rank: max seconds between shots of the same scene and framing that still stack (0 = bursts only). |
+| `polaroica.sortBy` | `name` | Default order: `name`, `modified` or `size`. |
+| `polaroica.showPhotoCounts` | `true` | Photo counts in the tree. |
+| `polaroica.thumbnailSize` | `256` | Thumbnail long edge: 192, 256 or 320 px (≈ 4 / 6 / 9 KB each). |
+| `polaroica.cacheSizeMB` | `1024` | Disk space for the local cache. |
+| `polaroica.backgroundThumbnails` | `true` | Build thumbnails for the whole library in the background. |
+| `polaroica.autoRank.burstSeconds` | `2` | Auto-Rank: max seconds between frames of one burst. |
+| `polaroica.autoRank.sceneSeconds` | `60` | Auto-Rank: max seconds between shots of the same scene and framing that still stack (0 = bursts only). |
 
 ## Develop
 
@@ -136,7 +136,7 @@ npm install
 npm test
 ```
 
-Then press **F5** in VS Code (*Run Photo Library extension*) to start an Extension Development
+Then press **F5** in VS Code (*Run Polaroica extension*) to start an Extension Development
 Host. To build a `.vsix`:
 
 ```bash

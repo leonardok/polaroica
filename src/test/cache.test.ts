@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import { test } from 'node:test';
 import { CacheManager } from '../core/cache';
 
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'vsphoto-cache-'));
+const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'polaroica-cache-'));
 const thumb = (n: number, len = 100) => ({ data: Buffer.alloc(len, n), w: 4, h: 3 });
 
 test('thumbnails round-trip, keyed by size and mtime, and survive a restart', async () => {

@@ -2,8 +2,8 @@
 // The cached thumbnail shows at once, scaled up, while the original streams in from the share.
 // With ADJUST open, or when the photo has edits, the photo is drawn with WebGL (adjust.js).
 (function () {
-  const { vscode, h, icon, crumbs, detailsList, blobUrl, section, photoContext, rankExplanation, keyBelongsToControl } = window.vsphoto;
-  const A = window.vsphotoAdjust;
+  const { vscode, h, icon, crumbs, detailsList, blobUrl, section, photoContext, rankExplanation, keyBelongsToControl } = window.polaroica;
+  const A = window.polaroicaAdjust;
   const app = document.getElementById('app');
   let zoom = (vscode.getState() || {}).zoom || 'fit';
   let detailsBody, adjustSection, frameEl, noteEl, current, beforeBtn, undoBtn, redoBtn, stripCurrentDot;

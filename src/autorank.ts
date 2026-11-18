@@ -11,7 +11,7 @@ import { emptySidecar, Sidecar } from './core/xmp';
 import { EditStore } from './edits';
 import { mapLimit, Photo, PhotoStore, readHead, readRange, readWhole } from './photoStore';
 
-const CHOICES_KEY = 'vsphoto.autoRankChoices';
+const CHOICES_KEY = 'polaroica.autoRankChoices';
 
 /** Where an Auto-Rank run spends its time (for the log). */
 interface RunStats {
@@ -79,8 +79,8 @@ export class AutoRanker {
       exposure: choices.has('exposure'),
       similar: choices.has('similar'),
       reject: choices.has('reject'),
-      burstSeconds: vscode.workspace.getConfiguration('vsphoto').get<number>('autoRank.burstSeconds', 2),
-      sceneSeconds: vscode.workspace.getConfiguration('vsphoto').get<number>('autoRank.sceneSeconds', 60),
+      burstSeconds: vscode.workspace.getConfiguration('polaroica').get<number>('autoRank.burstSeconds', 2),
+      sceneSeconds: vscode.workspace.getConfiguration('polaroica').get<number>('autoRank.sceneSeconds', 60),
       people: PEOPLE.filter((k) => choices.has(k)),
     };
     let model: FaceModels | undefined;
@@ -200,7 +200,7 @@ export class AutoRanker {
               `The face model failed on ${faceFails} of ${faceRuns} photos${ok ? '' : ', so People was not used'}: ${firstError}`,
               'Show Log',
             )
-            .then((pick) => pick && vscode.commands.executeCommand('vsphoto.showLog'));
+            .then((pick) => pick && vscode.commands.executeCommand('polaroica.showLog'));
         }
         return token.isCancellationRequested;
       },
@@ -320,7 +320,7 @@ export class AutoRanker {
   }
 
   private updateUndoContext(): Thenable<unknown> {
-    return vscode.commands.executeCommand('setContext', 'vsphoto.canUndoAutoRank', this.undoOrder.length > 0);
+    return vscode.commands.executeCommand('setContext', 'polaroica.canUndoAutoRank', this.undoOrder.length > 0);
   }
 
   /** Make another shot of a similar group its best (pick), instead of the one Auto-Rank chose. */

@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 import { Libraries } from './libraries';
 import { isReachable, mapLimit, PhotoStore } from './photoStore';
 
-export const TREE_MIME = 'application/vnd.code.tree.vsphoto.libraries';
+export const TREE_MIME = 'application/vnd.code.tree.polaroica.libraries';
 
 export class LibraryNode {
   readonly type = 'library';
@@ -69,7 +69,7 @@ export class LibraryTree implements vscode.TreeDataProvider<TreeNode>, vscode.Tr
   }
 
   getTreeItem(node: TreeNode): vscode.TreeItem {
-    const showCounts = vscode.workspace.getConfiguration('vsphoto').get<boolean>('showPhotoCounts', true);
+    const showCounts = vscode.workspace.getConfiguration('polaroica').get<boolean>('showPhotoCounts', true);
     if (node instanceof LibraryNode) {
       const kind = this.libraries.kind(node.folder);
       const isOffline = this.offline.has(node.uri.fsPath);
@@ -89,7 +89,7 @@ export class LibraryTree implements vscode.TreeDataProvider<TreeNode>, vscode.Tr
           : new vscode.ThemeIcon('device-desktop', new vscode.ThemeColor('charts.blue'));
       item.contextValue = isOffline ? 'library.offline' : 'library';
       if (!isOffline) {
-        item.command = { command: 'vsphoto.openFolder', title: 'Open', arguments: [node.uri] };
+        item.command = { command: 'polaroica.openFolder', title: 'Open', arguments: [node.uri] };
       }
       return item;
     }
@@ -110,7 +110,7 @@ export class LibraryTree implements vscode.TreeDataProvider<TreeNode>, vscode.Tr
     if (showCounts && info?.photos) {
       item.description = info.photos.toLocaleString() + (info.picks ? ` · ${info.picks} ✓` : '');
     }
-    item.command = { command: 'vsphoto.openFolder', title: 'Open', arguments: [node.uri] };
+    item.command = { command: 'polaroica.openFolder', title: 'Open', arguments: [node.uri] };
     return item;
   }
 

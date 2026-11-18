@@ -1,7 +1,7 @@
 // Library view: photo grid for one folder. Shows thumbnails only (never the originals): the
 // extension sends cached ones, placeholders, and asks this page to decode + shrink the rest.
 (function () {
-  const { vscode, h, icon, crumbs, detailsList, blobUrl, makeThumbnail, section, photoContext, rankExplanation, keyBelongsToControl } = window.vsphoto;
+  const { vscode, h, icon, crumbs, detailsList, blobUrl, makeThumbnail, section, photoContext, rankExplanation, keyBelongsToControl } = window.polaroica;
   const app = document.getElementById('app');
 
   let photos = [];
@@ -624,8 +624,8 @@
         break;
       }
       case 'faces':
-        window.vsphoto.faces
-          .detect(window.vsphoto.bytes(m.data), m.width, m.height, m.runtime, m.models)
+        window.polaroica.faces
+          .detect(window.polaroica.bytes(m.data), m.width, m.height, m.runtime, m.models)
           .then((faces) => post({ type: 'facesResult', id: m.id, faces }))
           .catch((err) => post({ type: 'facesResult', id: m.id, error: String((err && err.message) || err) }));
         break;

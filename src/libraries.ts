@@ -9,8 +9,8 @@ import {
 } from './core/smb';
 import { isReachable } from './photoStore';
 
-const NETWORK_KEY = 'vsphoto.networkLibraries';
-const RECENT_KEY = 'vsphoto.recentShares';
+const NETWORK_KEY = 'polaroica.networkLibraries';
+const RECENT_KEY = 'polaroica.recentShares';
 
 export type LibraryKind = 'local' | 'smb';
 

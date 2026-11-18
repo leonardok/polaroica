@@ -2,7 +2,7 @@
 // ADJUST panel UI. Non-destructive: the settings are saved to .sidecar/<photo>.xmp by the
 // extension; the photo file is never changed. Loaded after common.js.
 (function () {
-  const { h, icon } = window.vsphoto;
+  const { h, icon } = window.polaroica;
 
   const SLIDERS = [
     { id: 'exposure', label: 'Exposure', min: -5, max: 5, step: 0.05, group: 'light' },
@@ -591,5 +591,5 @@ void main() {
     };
   }
 
-  window.vsphotoAdjust = { defaults, clone, isDefault, same, createPanel, Renderer, curveTable };
+  window.polaroicaAdjust = { defaults, clone, isDefault, same, createPanel, Renderer, curveTable };
 })();

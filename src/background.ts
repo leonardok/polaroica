@@ -47,7 +47,7 @@ export class BackgroundThumbnails implements vscode.Disposable {
   ) {}
 
   get enabled(): boolean {
-    return vscode.workspace.getConfiguration('vsphoto').get<boolean>('backgroundThumbnails', true);
+    return vscode.workspace.getConfiguration('polaroica').get<boolean>('backgroundThumbnails', true);
   }
 
   /** Start (or restart) after a short delay, so opening the window stays snappy. */
@@ -91,8 +91,8 @@ export class BackgroundThumbnails implements vscode.Disposable {
     if (this.sharpMade > 0 || this.cacheFull) {
       const s = this.thumbs.sources;
       const msg = this.cacheFull
-        ? `Photo Library: thumbnail cache is full (${Math.round(this.capBytes() / 1048576)} MB). Raise "vsphoto.cacheSizeMB" to cover the whole library.`
-        : `Photo Library: thumbnails ready for ${this.photos.length.toLocaleString()} photos` +
+        ? `Polaroica: thumbnail cache is full (${Math.round(this.capBytes() / 1048576)} MB). Raise "polaroica.cacheSizeMB" to cover the whole library.`
+        : `Polaroica: thumbnails ready for ${this.photos.length.toLocaleString()} photos` +
           ` (${s.preview.toLocaleString()} from built-in previews, ${s.full.toLocaleString()} from full files).`;
       void vscode.window.showInformationMessage(msg);
     }

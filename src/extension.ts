@@ -14,14 +14,49 @@ import { AutoRanker } from './autorank';
 import { FolderNode, LibraryNode, LibraryTree, TreeNode } from './tree';
 import { PhotoViewers } from './viewer';
 
+/** Settings keys that were called `vsphoto.*` before the project was renamed to Polaroica. */
+const LEGACY_SETTINGS = [
+  'sortBy',
+  'showPhotoCounts',
+  'thumbnailSize',
+  'cacheSizeMB',
+  'backgroundThumbnails',
+  'autoRank.burstSeconds',
+  'autoRank.sceneSeconds',
+];
+
+/** Copies `vsphoto.*` settings to `polaroica.*` where the new key isn't set yet. */
+async function migrateLegacySettings(): Promise<void> {
+  const oldCfg = vscode.workspace.getConfiguration('vsphoto');
+  const newCfg = vscode.workspace.getConfiguration('polaroica');
+  for (const key of LEGACY_SETTINGS) {
+    const was = oldCfg.inspect(key);
+    const now = newCfg.inspect(key);
+    if (!was || !now) {
+      continue;
+    }
+    try {
+      if (was.globalValue !== undefined && now.globalValue === undefined) {
+        await newCfg.update(key, was.globalValue, vscode.ConfigurationTarget.Global);
+      }
+      if (was.workspaceValue !== undefined && now.workspaceValue === undefined && vscode.workspace.workspaceFolders) {
+        await newCfg.update(key, was.workspaceValue, vscode.ConfigurationTarget.Workspace);
+      }
+    } catch {
+      /* a read-only settings file: keep the defaults */
+    }
+  }
+}
+
 export function activate(context: vscode.ExtensionContext): void {
+  void migrateLegacySettings();
   const libraries = new Libraries(context);
   const cacheDir = vscode.Uri.joinPath(context.globalStorageUri, 'cache-v1').fsPath;
-  const capMb = () => vscode.workspace.getConfiguration('vsphoto').get<number>('cacheSizeMB', 1024);
+  const capMb = () => vscode.workspace.getConfiguration('polaroica').get<number>('cacheSizeMB', 1024);
   const cache = new CacheManager(cacheDir, capMb() * 1024 * 1024);
   const store = new PhotoStore(cache);
   const thumbs = new ThumbService(store);
-  const output = vscode.window.createOutputChannel('Photo Library');
+  const output = vscode.window.createOutputChannel('Polaroica');
   context.subscriptions.push(output);
   thumbs.log = (line) => output.appendLine(`[${new Date().toLocaleTimeString()}] ${line}`);
   const edits = new EditStore(cache);
@@ -57,7 +92,7 @@ export function activate(context: vscode.ExtensionContext): void {
     return n;
   };
   context.subscriptions.push(edits.onDidChange((photo) => void tree.picksChanged(path.dirname(photo.fsPath))));
-  const view = vscode.window.createTreeView('vsphoto.libraries', {
+  const view = vscode.window.createTreeView('polaroica.libraries', {
     treeDataProvider: tree,
     dragAndDropController: tree,
     showCollapseAll: true,
@@ -109,31 +144,31 @@ export function activate(context: vscode.ExtensionContext): void {
       background.schedule(3000);
     }),
     vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration('vsphoto.cacheSizeMB')) {
+      if (e.affectsConfiguration('polaroica.cacheSizeMB')) {
         cache.setCap(capMb() * 1024 * 1024);
       }
-      if (e.affectsConfiguration('vsphoto.backgroundThumbnails')) {
+      if (e.affectsConfiguration('polaroica.backgroundThumbnails')) {
         if (background.enabled) {
           background.schedule(1000);
         } else {
           background.stop();
         }
       }
-      if (e.affectsConfiguration('vsphoto.thumbnailSize')) {
+      if (e.affectsConfiguration('polaroica.thumbnailSize')) {
         background.schedule(3000);
       }
-      if (e.affectsConfiguration('vsphoto.showPhotoCounts') || e.affectsConfiguration('vsphoto.sortBy')) {
+      if (e.affectsConfiguration('polaroica.showPhotoCounts') || e.affectsConfiguration('polaroica.sortBy')) {
         tree.refresh();
       }
     }),
 
-    vscode.commands.registerCommand('vsphoto.addLibrary', () => libraries.add()),
-    vscode.commands.registerCommand('vsphoto.refresh', () => tree.refresh()),
-    vscode.commands.registerCommand('vsphoto.cacheInfo', async () => {
+    vscode.commands.registerCommand('polaroica.addLibrary', () => libraries.add()),
+    vscode.commands.registerCommand('polaroica.refresh', () => tree.refresh()),
+    vscode.commands.registerCommand('polaroica.cacheInfo', async () => {
       const s = await cache.stats();
       const clear = 'Clear Cache';
       const pick = await vscode.window.showInformationMessage(
-        `Photo Library cache: ${formatBytes(s.bytes)} of ${capMb()} MB, ${s.folders.toLocaleString()} folders` +
+        `Polaroica cache: ${formatBytes(s.bytes)} of ${capMb()} MB, ${s.folders.toLocaleString()} folders` +
           (s.avgThumbBytes ? `, about ${formatBytes(s.avgThumbBytes)} per thumbnail` : ''),
         { detail: cacheDir },
         clear,
@@ -145,7 +180,7 @@ export function activate(context: vscode.ExtensionContext): void {
         background.schedule(3000);
       }
     }),
-    vscode.commands.registerCommand('vsphoto.autoRank', async (arg?: unknown) => {
+    vscode.commands.registerCommand('polaroica.autoRank', async (arg?: unknown) => {
       const uri = uriOf(arg);
       if (uri) {
         grids.open(uri);
@@ -154,8 +189,8 @@ export function activate(context: vscode.ExtensionContext): void {
         void vscode.window.showInformationMessage('Right-click an album in Photo Libraries, or use the Auto-Rank button in a grid.');
       }
     }),
-    vscode.commands.registerCommand('vsphoto.showLog', () => output.show()),
-    vscode.commands.registerCommand('vsphoto.undoAutoRank', async (arg?: unknown) => {
+    vscode.commands.registerCommand('polaroica.showLog', () => output.show()),
+    vscode.commands.registerCommand('polaroica.undoAutoRank', async (arg?: unknown) => {
       let uri = uriOf(arg);
       if (!uri) {
         const albums = ranker.undoable();
@@ -175,8 +210,8 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       if (uri) await ranker.undoRun(uri);
     }),
-    vscode.commands.registerCommand('vsphoto.buildThumbnails', () => background.start()),
-    vscode.commands.registerCommand('vsphoto.thumbnailProgress', async () => {
+    vscode.commands.registerCommand('polaroica.buildThumbnails', () => background.start()),
+    vscode.commands.registerCommand('polaroica.thumbnailProgress', async () => {
       const running = background.status === 'running';
       const paused = background.status === 'paused';
       const actions = running ? ['Pause', 'Stop'] : paused ? ['Resume', 'Stop'] : ['Start'];
@@ -193,25 +228,25 @@ export function activate(context: vscode.ExtensionContext): void {
         background.stop();
       }
     }),
-    vscode.commands.registerCommand('vsphoto.removeLibrary', async (node?: TreeNode) => {
+    vscode.commands.registerCommand('polaroica.removeLibrary', async (node?: TreeNode) => {
       const target = node instanceof LibraryNode ? node : view.selection.find((n) => n instanceof LibraryNode);
       if (target instanceof LibraryNode) {
         await libraries.remove(target.folder);
       }
     }),
-    vscode.commands.registerCommand('vsphoto.openFolder', (arg?: unknown) => {
+    vscode.commands.registerCommand('polaroica.openFolder', (arg?: unknown) => {
       const uri = uriOf(arg);
       if (uri) {
         grids.open(uri);
       }
     }),
-    vscode.commands.registerCommand('vsphoto.moveTo', async (node?: TreeNode, nodes?: TreeNode[]) => {
+    vscode.commands.registerCommand('polaroica.moveTo', async (node?: TreeNode, nodes?: TreeNode[]) => {
       const picked = (nodes?.length ? nodes : node ? [node] : [...view.selection]).filter(
         (n): n is FolderNode => n instanceof FolderNode,
       );
       await mover.moveWithPicker(picked.map((n) => n.uri));
     }),
-    vscode.commands.registerCommand('vsphoto.newFolder', async (arg?: unknown) => {
+    vscode.commands.registerCommand('polaroica.newFolder', async (arg?: unknown) => {
       const parent = uriOf(arg);
       if (!parent) {
         return;
@@ -228,15 +263,15 @@ export function activate(context: vscode.ExtensionContext): void {
     // Right-click menu inside the grid and photo tabs (webview/context). VS Code passes the
     // data-vscode-context of the clicked element: { webview, webviewSection, photo }.
     ...(['move', 'reveal'] as const).map((action) =>
-      vscode.commands.registerCommand(action === 'move' ? 'vsphoto.photoMoveTo' : 'vsphoto.photoReveal', async (ctx?: { webview?: string; photo?: string }) => {
-        if (ctx?.webview === 'vsphoto.grid') {
+      vscode.commands.registerCommand(action === 'move' ? 'polaroica.photoMoveTo' : 'polaroica.photoReveal', async (ctx?: { webview?: string; photo?: string }) => {
+        if (ctx?.webview === 'polaroica.grid') {
           await grids.contextAction(action, ctx.photo);
-        } else if (ctx?.webview === 'vsphoto.photo') {
+        } else if (ctx?.webview === 'polaroica.photo') {
           await viewers.contextAction(action);
         }
       }),
     ),
-    vscode.commands.registerCommand('vsphoto.revealInOS', async (arg?: unknown) => {
+    vscode.commands.registerCommand('polaroica.revealInOS', async (arg?: unknown) => {
       const uri = uriOf(arg);
       if (uri) {
         await vscode.commands.executeCommand('revealFileInOS', uri);

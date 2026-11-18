@@ -7,7 +7,7 @@ import { PhotoStore } from './photoStore';
 import { thumbPx } from './thumbs';
 import { EditStore } from './edits';
 
-const RECENT_TARGETS = 'vsphoto.recentMoveTargets';
+const RECENT_TARGETS = 'polaroica.recentMoveTargets';
 
 export interface MoveResult {
   moved: Array<{ from: vscode.Uri; to: vscode.Uri }>;

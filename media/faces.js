@@ -290,9 +290,9 @@
     return pageEngine.detect(job.data, job.width, job.height, runtime, modelBytes);
   }
 
-  window.vsphoto.faces = {
+  window.polaroica.faces = {
     detect: (data, width, height, rt, bytes) => {
-      if (bytes) modelBytes = { landmarker: window.vsphoto.bytes(bytes.landmarker), detector: window.vsphoto.bytes(bytes.detector) };
+      if (bytes) modelBytes = { landmarker: window.polaroica.bytes(bytes.landmarker), detector: window.polaroica.bytes(bytes.detector) };
       runtime = rt;
       const job = { data, width, height };
       const ws = modelBytes ? startWorkers() : null;
