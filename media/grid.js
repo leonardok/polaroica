@@ -134,16 +134,36 @@
     select(next, null);
   }
 
-  function columns() {
-    if (!tiles.length) {
-      return 1;
-    }
-    const top = tiles[0].offsetTop;
-    let c = 0;
-    while (c < tiles.length && tiles[c].offsetTop === top) {
-      c++;
-    }
-    return Math.max(1, c);
+  /** Justified grid: each tile is as wide as its photo's shape at the row height (see grid.css). */
+  function setRatio(tile, r) {
+    if (!(r > 0.2 && r < 6)) return;
+    const v = String(Math.round(r * 1000) / 1000);
+    if (tile.style.getPropertyValue('--r') !== v) tile.style.setProperty('--r', v);
+  }
+
+  /** Up/Down: the photo in the row above/below whose middle is closest (rows have no fixed columns). */
+  function moveVertical(dir) {
+    const cur = tiles[focusIndex < 0 ? 0 : focusIndex];
+    if (!cur) return;
+    const a = cur.getBoundingClientRect();
+    const mid = a.left + a.width / 2;
+    let best = -1;
+    let bestRow = Infinity;
+    let bestDx = Infinity;
+    tiles.forEach((t, i) => {
+      if (t.hidden) return;
+      const b = t.getBoundingClientRect();
+      const rowGap = dir > 0 ? b.top - a.bottom : a.top - b.bottom;
+      if (rowGap < -1) return; // same row or the wrong way
+      const dx = Math.abs(b.left + b.width / 2 - mid);
+      // Nearest row first, then the closest photo in it.
+      if (rowGap < bestRow - 1 || (Math.abs(rowGap - bestRow) <= 1 && dx < bestDx)) {
+        best = i;
+        bestRow = rowGap;
+        bestDx = dx;
+      }
+    });
+    if (best >= 0) moveFocus(best - (focusIndex < 0 ? 0 : focusIndex));
   }
 
   // ---- culling ----------------------------------------------------------------------
@@ -385,12 +405,20 @@
         h(
           'span',
           { class: 'thumb' },
-          h('img', { class: 'thumb-img', alt: '', decoding: 'async', draggable: 'false' }),
+          h('img', {
+            class: 'thumb-img',
+            alt: '',
+            decoding: 'async',
+            draggable: 'false',
+            // The real shape once a thumbnail shows (photos the index had no size for yet).
+            onload: (e) => setRatio(tile, e.target.naturalWidth / e.target.naturalHeight),
+          }),
           h('span', { class: 'thumb-label', 'aria-hidden': 'true' }, icon('photo', 20), p.ext || ''),
           h('span', { class: 'badges' }),
         ),
         h('span', { class: 'label' }, p.name),
       );
+      setRatio(tile, p.ratio || 1.5);
       paintTile(tile, p);
       tileByName.set(p.name, tile);
       applyThumb(tile, p.name);
@@ -444,9 +472,9 @@
     } else if (e.key === 'ArrowLeft') {
       moveFocus(-1);
     } else if (e.key === 'ArrowDown') {
-      moveFocus(columns());
+      moveVertical(1);
     } else if (e.key === 'ArrowUp') {
-      moveFocus(-columns());
+      moveVertical(-1);
     } else if (mod && e.key.toLowerCase() === 'a') {
       selected = new Set(photos.map((p) => p.name));
       paintSelection();

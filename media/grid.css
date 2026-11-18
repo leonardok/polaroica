@@ -30,13 +30,29 @@
   white-space: nowrap;
 }
 
+/*
+ * Justified rows: every tile is as wide as its photo's shape (--r = width ÷ height, set per tile)
+ * at the row height, and each row grows to fill the width, so portrait and landscape photos sit
+ * side by side with no letterboxing. The Size slider (--tile: the width of a 3:2 photo) sets the
+ * row height. The filler at the end stops the last row from stretching.
+ */
 .grid {
   --tile: 160px;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(var(--tile), 1fr));
+  --row: calc(var(--tile) / 1.5);
+  display: flex;
+  flex-wrap: wrap;
   gap: var(--gap);
   padding: 16px 20px 24px;
-  align-content: start;
+  align-content: flex-start;
+}
+.grid::after {
+  content: '';
+  flex: 1000000 1 0px;
+}
+.grid > .tile {
+  --r: 1.5;
+  flex: calc(var(--r) * 100) 1 calc(var(--r) * var(--row));
+  min-width: 0;
 }
 
 .tile {
@@ -53,7 +69,7 @@
 .tile .thumb {
   display: block;
   width: 100%;
-  aspect-ratio: 3 / 2;
+  aspect-ratio: var(--r, 1.5);
   border-radius: 3px;
   overflow: hidden;
   outline: 2px solid transparent;

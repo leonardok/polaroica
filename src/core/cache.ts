@@ -145,6 +145,23 @@ export class FolderCache {
     return e && e.size === size && e.mtime === mtime ? e.info : undefined;
   }
 
+  /**
+   * Width ÷ height of the photo as shown (upright), when known: from its cached thumbnail, else
+   * from its EXIF size and orientation.
+   */
+  aspect(name: string, size: number, mtime: number): number | undefined {
+    const t = this.data.thumbs[name];
+    if (t && t.size === size && t.mtime === mtime && t.w > 0 && t.h > 0) {
+      return t.w / t.h;
+    }
+    const x = this.getExif(name, size, mtime);
+    if (x?.width && x.height) {
+      const sideways = (x.orientation ?? 1) >= 5 && (x.orientation ?? 1) <= 8;
+      return sideways ? x.height / x.width : x.width / x.height;
+    }
+    return undefined;
+  }
+
   setExif(name: string, size: number, mtime: number, info: ExifInfo | undefined): void {
     this.data.exif[name] = { size, mtime, info: info ?? null };
     this.scheduleSave();

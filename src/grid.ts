@@ -330,13 +330,19 @@ class GridPanel {
     const tileSize = this.owner.ctx.context.globalState.get<number>('vsphoto.tileSize', 160);
     const cull = (await this.owner.ctx.edits?.cullingIn(this.folder.fsPath)) ?? new Map();
     this.cull = new Map(cull);
+    // Each photo's shape, so the justified grid is laid out right before thumbnails arrive.
+    const fc = await store.cache.folder(this.folder.fsPath);
+    const ratio = (p: Photo) => {
+      const r = fc.aspect(p.name, p.size, p.mtime);
+      return r ? Math.round(r * 1000) / 1000 : undefined;
+    };
     void post(this.webview, {
       type: 'init',
       crumbs: libraries.crumbs(this.folder),
       sort: this.sort,
       tileSize,
       selected: this.selected,
-      photos: this.photos.map((p) => ({ ...toView(this.webview, p), src: undefined, cull: cull.get(p.name) ?? null })),
+      photos: this.photos.map((p) => ({ ...toView(this.webview, p), src: undefined, cull: cull.get(p.name) ?? null, ratio: ratio(p) })),
     });
     this.owner.updateStatus();
     this.job.setPhotos(this.photos);
