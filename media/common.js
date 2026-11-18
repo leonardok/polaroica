@@ -95,94 +95,54 @@
     );
   }
 
-  /**
-   * Loads images that are on screen, at most `max` at a time, top to bottom. Scrolling a
-   * loading image away, or hiding the tab, cancels its download, so a slow network share is
-   * never asked for photos nobody is looking at.
-   */
-  function createLoader(max, root) {
-    const visible = new Set();
-    const loading = new Set();
-    let paused = false;
-
-    const cancel = (img) => {
-      img.onload = img.onerror = null;
-      img.removeAttribute('src');
-      loading.delete(img);
-    };
-    const pump = () => {
-      if (paused || document.hidden) {
-        return;
-      }
-      for (const img of visible) {
-        if (loading.size >= max) {
-          break;
-        }
-        if (img.dataset.loaded || loading.has(img)) {
-          continue;
-        }
-        loading.add(img);
-        img.onload = img.onerror = () => {
-          img.onload = img.onerror = null;
-          loading.delete(img);
-          img.dataset.loaded = '1';
-          img.classList.add('ready');
-          pump();
-        };
-        img.src = img.dataset.src;
-      }
-    };
-    const io = new IntersectionObserver(
-      (entries) => {
-        for (const e of entries) {
-          const img = e.target;
-          if (e.isIntersecting) {
-            visible.add(img);
-          } else {
-            visible.delete(img);
-            if (loading.has(img)) {
-              cancel(img);
-            }
-          }
-        }
-        pump();
-      },
-      { root: root || null, rootMargin: '200px' },
-    );
-    const pauseAll = () => {
-      for (const img of [...loading]) {
-        cancel(img);
-      }
-    };
-    const onVisibility = () => (document.hidden ? pauseAll() : pump());
-    let listening = false;
-
-    return {
-      observe(img) {
-        if (!listening) {
-          document.addEventListener('visibilitychange', onVisibility);
-          listening = true;
-        }
-        io.observe(img);
-      },
-      /** Pause while the tab is hidden or the page needs the bandwidth for something else. */
-      setPaused(p) {
-        paused = p;
-        if (p) {
-          pauseAll();
-        } else {
-          pump();
-        }
-      },
-      reset() {
-        io.disconnect();
-        document.removeEventListener('visibilitychange', onVisibility);
-        listening = false;
-        pauseAll();
-        visible.clear();
-      },
-    };
+  /** Object URL for bytes sent by the extension (Uint8Array). */
+  function blobUrl(data, mime) {
+    return URL.createObjectURL(new Blob([data], { type: mime }));
   }
 
-  window.vsphoto = { vscode, h, icon, crumbs, detailsList, picture, createLoader };
+  /**
+   * Decode a photo and shrink it to a WebP thumbnail (long edge `px`). Runs in the webview
+   * because it has the browser's image decoders; the extension stores the result.
+   */
+  async function makeThumbnail(data, mime, px) {
+    const blob = new Blob([data], { type: mime });
+    let source;
+    try {
+      source = await createImageBitmap(blob); // applies EXIF orientation
+    } catch {
+      // e.g. SVG: go through an <img>
+      const url = URL.createObjectURL(blob);
+      try {
+        source = await new Promise((resolve, reject) => {
+          const img = new Image();
+          img.onload = () => resolve(img);
+          img.onerror = reject;
+          img.src = url;
+        });
+      } finally {
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+    }
+    const sw = source.width || source.naturalWidth;
+    const sh = source.height || source.naturalHeight;
+    const scale = Math.min(1, px / Math.max(sw, sh));
+    const w = Math.max(1, Math.round(sw * scale));
+    const h = Math.max(1, Math.round(sh * scale));
+    let drawable = source;
+    if (source instanceof ImageBitmap && scale < 1) {
+      drawable = await createImageBitmap(source, { resizeWidth: w, resizeHeight: h, resizeQuality: 'high' });
+      source.close();
+    }
+    const canvas = new OffscreenCanvas(w, h);
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(drawable, 0, 0, w, h);
+    if (drawable instanceof ImageBitmap) {
+      drawable.close();
+    }
+    const out = await canvas.convertToBlob({ type: 'image/webp', quality: 0.6 });
+    return { data: new Uint8Array(await out.arrayBuffer()), w, h };
+  }
+
+  window.vsphoto = { vscode, h, icon, crumbs, detailsList, picture, blobUrl, makeThumbnail };
 })();

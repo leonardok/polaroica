@@ -38,18 +38,38 @@ If the share isn't found there, choose the mounted folder yourself (the warning 
 **Windows:** VS Code only opens UNC paths on hosts listed in `security.allowedUNCHosts`. When you
 add a share, the extension offers to add its host there for you.
 
+## Speed: thumbnails and the local index
+
+Photos on a network share are big and the network is slow, so the extension keeps a **local
+cache** on this computer (in VS Code's extension storage, never on the share):
+
+- **Thumbnails**: 256 px WebP, about 5 KB each, packed into one file per folder. The grid only
+  ever shows thumbnails. The first time a folder is opened, on-screen photos get the small preview
+  embedded in their EXIF straight away, then a proper thumbnail (each original is read from the
+  share once). After that the folder's thumbnails load from local disk in milliseconds.
+- **Folder index**: file names, sizes, dates and EXIF. Folders and the tree's photo counts appear
+  instantly from the index; the share is re-checked in the background.
+- **Photo tabs** show the cached thumbnail at once, scaled up, while the original streams in, then
+  preload the previous and next photos. The filmstrip uses thumbnails.
+- **Moves** carry the cached thumbnail along, so it is not generated again.
+- Cache size is capped (`vsphoto.cacheSizeMB`, default 512 MB ≈ 100,000 photos); the least recently
+  viewed folders are removed first. **Photo Library: Show Cache Info** shows the size and the
+  average thumbnail size, and can clear it.
+
 ## Formats
 
-The grid and photo tabs draw JPEG, PNG, GIF, WebP, AVIF, BMP and SVG. Camera RAW (NEF, CR2, CR3,
-ARW, DNG, RAF, ORF, RW2, …), TIFF and HEIC are listed, moved and show EXIF, but display as a
-labelled placeholder for now.
+The grid and photo tabs draw JPEG, PNG, GIF, WebP, AVIF, BMP and SVG. Camera RAW files (NEF, CR2,
+ARW, DNG, ORF, RW2, PEF, RAF, …) show the preview JPEG embedded in the file; CR3, TIFF and HEIC
+display as a labelled placeholder for now.
 
 ## Settings
 
 | Setting | Default | |
 | --- | --- | --- |
 | `vsphoto.sortBy` | `name` | Default order: `name`, `modified` or `size`. |
-| `vsphoto.showPhotoCounts` | `true` | Photo counts in the tree. Turn off for very slow shares. |
+| `vsphoto.showPhotoCounts` | `true` | Photo counts in the tree. |
+| `vsphoto.thumbnailSize` | `256` | Thumbnail long edge: 192, 256 or 320 px (≈ 4 / 6 / 9 KB each). |
+| `vsphoto.cacheSizeMB` | `512` | Disk space for the local cache. |
 
 ## Develop
 
@@ -70,10 +90,10 @@ npx @vscode/vsce package
 
 ## Known limitations / next steps
 
-- Thumbnails are the original files scaled by the webview. Large JPEGs on a slow share load
-  slowly; a local thumbnail cache is the next step.
-- RAW previews (most RAW files embed a JPEG preview that could be extracted).
+- Thumbnails are made only for folders you open (on-screen photos first, then the rest of the
+  folder while its grid is visible). A "build thumbnails for the whole library" command could come
+  later.
 - Dragging photos from the grid onto the tree uses the standard `text/uri-list` drag data; if your
-  VS Code version doesn't accept drops from webviews, use *Move to…*.
+  editor doesn't accept drops from webviews, use *Move to…*.
 - File-change watching may not fire for every SMB server; use **Refresh** in the view title or
   grid toolbar.

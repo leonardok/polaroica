@@ -78,10 +78,35 @@
 .tile.selected .label {
   color: var(--vscode-foreground);
 }
+.tile .thumb {
+  position: relative;
+}
+.thumb-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
 .tile img.thumb-img {
+  position: absolute;
+  inset: 0;
   opacity: 0;
   transition: opacity 0.15s;
 }
-.tile img.thumb-img.ready {
+.tile.has-thumb img.thumb-img {
   opacity: 1;
+}
+.tile.has-thumb .thumb-label {
+  visibility: hidden;
+}
+/* The small EXIF preview is soft when scaled up: blur it slightly until the real one arrives. */
+.tile.is-placeholder img.thumb-img {
+  filter: blur(1.5px);
+  transform: scale(1.03);
 }

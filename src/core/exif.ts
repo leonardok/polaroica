@@ -1,7 +1,10 @@
 /**
- * Minimal EXIF reader for the details panel. Reads the TIFF structure found in JPEG APP1
- * segments and in TIFF-based RAW files (NEF, CR2, ARW, DNG, ORF, ...). Only the handful of
- * tags the UI shows. No `vscode` import.
+ * Minimal EXIF / TIFF reader. Reads the TIFF structure found in JPEG APP1 segments and in
+ * TIFF-based RAW files (NEF, CR2, ARW, DNG, ORF, RW2, PEF, ...) for:
+ *  - the handful of tags the details panel shows,
+ *  - the small thumbnail JPEG cameras embed in EXIF (instant placeholder),
+ *  - the large preview JPEGs RAW files embed (RAW display without a RAW decoder).
+ * No `vscode` import.
  */
 
 export interface ExifInfo {
@@ -18,12 +21,24 @@ export interface ExifInfo {
   orientation?: number;
 }
 
+/** A byte range inside the file (or the buffer that was parsed). */
+export interface ByteRange {
+  offset: number;
+  length: number;
+}
+
 const TAG = {
   imageWidth: 0x0100,
   imageHeight: 0x0101,
+  compression: 0x0103,
   make: 0x010f,
   model: 0x0110,
+  stripOffsets: 0x0111,
   orientation: 0x0112,
+  stripByteCounts: 0x0117,
+  subIfds: 0x014a,
+  jpegOffset: 0x0201,
+  jpegLength: 0x0202,
   exifIfd: 0x8769,
   exposureTime: 0x829a,
   fNumber: 0x829d,
@@ -35,12 +50,119 @@ const TAG = {
   lensModel: 0xa434,
 };
 
-/** Parse EXIF from the first bytes of a file (256 KB is plenty for JPEG and most RAW). */
-export function readExif(buf: Uint8Array): ExifInfo | undefined {
+type Value = number | string | number[] | undefined;
+
+interface Ifd {
+  /** Tag -> value. Arrays for multi-value numeric tags. */
+  tags: Map<number, Value>;
+  /** 0 = IFD0, 1 = IFD1 (thumbnail), 'exif', 'sub' */
+  kind: string;
+}
+
+/** Walks every IFD reachable from a TIFF header at `base` inside `buf`. */
+function readTiff(buf: Uint8Array, base: number, end: number): Ifd[] | undefined {
+  if (end - base < 8) {
+    return undefined;
+  }
+  const little = buf[base] === 0x49;
+  if (!little && buf[base] !== 0x4d) {
+    return undefined;
+  }
+  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  const inRange = (o: number, n: number) => o >= base && o + n <= end;
+  const u16 = (o: number) => view.getUint16(o, little);
+  const u32 = (o: number) => view.getUint32(o, little);
+  const typeSize: Record<number, number> = { 1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 7: 1, 9: 4, 10: 8, 13: 4 };
+
+  const readValue = (entry: number): Value => {
+    const type = u16(entry + 2);
+    const count = u32(entry + 4);
+    const size = (typeSize[type] ?? 0) * count;
+    if (!size || count > 100000) {
+      return undefined;
+    }
+    const valOff = size <= 4 ? entry + 8 : base + u32(entry + 8);
+    if (!inRange(valOff, size)) {
+      return undefined;
+    }
+    switch (type) {
+      case 2: {
+        let s = '';
+        for (let i = 0; i < count; i++) {
+          const c = buf[valOff + i];
+          if (c === 0) {
+            break;
+          }
+          s += String.fromCharCode(c);
+        }
+        return s.trim();
+      }
+      case 3:
+      case 4:
+      case 13: {
+        const one = (i: number) => (type === 3 ? u16(valOff + i * 2) : u32(valOff + i * 4));
+        if (count === 1) {
+          return one(0);
+        }
+        return Array.from({ length: Math.min(count, 64) }, (_, i) => one(i));
+      }
+      case 9:
+        return view.getInt32(valOff, little);
+      case 5: {
+        const d = u32(valOff + 4);
+        return d ? u32(valOff) / d : undefined;
+      }
+      case 10: {
+        const d = view.getInt32(valOff + 4, little);
+        return d ? view.getInt32(valOff, little) / d : undefined;
+      }
+      default:
+        return undefined;
+    }
+  };
+
+  const out: Ifd[] = [];
+  const seen = new Set<number>();
+  const visit = (rel: number, kind: string, depth: number, followNext: boolean) => {
+    let ifd = base + rel;
+    let n = 0;
+    while (rel && depth < 4 && !seen.has(ifd) && inRange(ifd, 2) && n++ < 8) {
+      seen.add(ifd);
+      const count = u16(ifd);
+      if (count > 1000 || !inRange(ifd + 2, count * 12)) {
+        return;
+      }
+      const tags = new Map<number, Value>();
+      for (let i = 0; i < count; i++) {
+        const e = ifd + 2 + i * 12;
+        tags.set(u16(e), readValue(e));
+      }
+      const thisKind = kind === 'ifd' ? String(out.filter((x) => /^\d+$/.test(x.kind)).length) : kind;
+      out.push({ tags, kind: thisKind });
+      const exif = tags.get(TAG.exifIfd);
+      if (typeof exif === 'number') {
+        visit(exif, 'exif', depth + 1, false);
+      }
+      const subs = tags.get(TAG.subIfds);
+      for (const s of Array.isArray(subs) ? subs : typeof subs === 'number' ? [subs] : []) {
+        visit(s, 'sub', depth + 1, false);
+      }
+      if (!followNext || !inRange(ifd + 2 + count * 12, 4)) {
+        return;
+      }
+      rel = u32(ifd + 2 + count * 12);
+      ifd = base + rel;
+    }
+  };
+  visit(u32(base + 4), 'ifd', 0, true);
+  return out;
+}
+
+/** Where the TIFF structure starts: inside the JPEG APP1 "Exif" segment, or at 0 for TIFF/RAW. */
+function tiffBase(buf: Uint8Array): { base: number; end: number } | undefined {
   if (buf.length < 8) {
     return undefined;
   }
-  // JPEG
   if (buf[0] === 0xff && buf[1] === 0xd8) {
     let off = 2;
     while (off + 4 <= buf.length) {
@@ -55,125 +177,149 @@ export function readExif(buf: Uint8Array): ExifInfo | undefined {
       if (
         marker === 0xe1 &&
         off + 10 <= buf.length &&
-        buf[off + 4] === 0x45 && // E
-        buf[off + 5] === 0x78 && // x
-        buf[off + 6] === 0x69 && // i
-        buf[off + 7] === 0x66 // f
+        buf[off + 4] === 0x45 &&
+        buf[off + 5] === 0x78 &&
+        buf[off + 6] === 0x69 &&
+        buf[off + 7] === 0x66
       ) {
-        const start = off + 10;
-        return parseTiff(buf.subarray(start, Math.min(buf.length, off + 2 + len)));
+        return { base: off + 10, end: Math.min(buf.length, off + 2 + len) };
       }
       off += 2 + len;
     }
     return undefined;
   }
-  // TIFF / TIFF-based RAW ("II*\0" or "MM\0*"; ORF and RW2 use other magic numbers)
   if ((buf[0] === 0x49 && buf[1] === 0x49) || (buf[0] === 0x4d && buf[1] === 0x4d)) {
-    return parseTiff(buf);
+    return { base: 0, end: buf.length };
   }
   return undefined;
 }
 
-function parseTiff(t: Uint8Array): ExifInfo | undefined {
-  if (t.length < 8) {
+/** Parse EXIF from the first bytes of a file (64–256 KB is plenty for JPEG and most RAW). */
+export function readExif(buf: Uint8Array): ExifInfo | undefined {
+  const at = tiffBase(buf);
+  const ifds = at && readTiff(buf, at.base, at.end);
+  if (!ifds) {
     return undefined;
   }
-  const little = t[0] === 0x49;
-  const view = new DataView(t.buffer, t.byteOffset, t.byteLength);
-  const u16 = (o: number) => view.getUint16(o, little);
-  const u32 = (o: number) => view.getUint32(o, little);
-  const inRange = (o: number, n: number) => o >= 0 && o + n <= t.length;
-
   const info: ExifInfo = {};
-
-  const typeSize: Record<number, number> = { 1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 7: 1, 9: 4, 10: 8 };
-
-  function readValue(entry: number): number | string | undefined {
-    const type = u16(entry + 2);
-    const count = u32(entry + 4);
-    const size = (typeSize[type] ?? 0) * count;
-    if (!size) {
-      return undefined;
+  const str = (v: Value) => (typeof v === 'string' && v ? v : undefined);
+  const num = (v: Value) => (typeof v === 'number' ? v : undefined);
+  for (const ifd of ifds) {
+    const t = ifd.tags;
+    const main = ifd.kind === '0' || ifd.kind === 'exif';
+    if (!main) {
+      continue;
     }
-    const valOff = size <= 4 ? entry + 8 : u32(entry + 8);
-    if (!inRange(valOff, size)) {
-      return undefined;
-    }
-    switch (type) {
-      case 2: {
-        let s = '';
-        for (let i = 0; i < count; i++) {
-          const c = t[valOff + i];
-          if (c === 0) {
-            break;
-          }
-          s += String.fromCharCode(c);
-        }
-        return s.trim();
-      }
-      case 3:
-        return u16(valOff);
-      case 4:
-        return u32(valOff);
-      case 9:
-        return view.getInt32(valOff, little);
-      case 5: {
-        const d = u32(valOff + 4);
-        return d ? u32(valOff) / d : undefined;
-      }
-      case 10: {
-        const d = view.getInt32(valOff + 4, little);
-        return d ? view.getInt32(valOff, little) / d : undefined;
-      }
-      default:
-        return undefined;
+    info.make ??= str(t.get(TAG.make));
+    info.model ??= str(t.get(TAG.model));
+    info.lens ??= str(t.get(TAG.lensModel));
+    info.dateTaken ??= str(t.get(TAG.dateTimeOriginal));
+    info.exposureTime ??= num(t.get(TAG.exposureTime));
+    info.fNumber ??= num(t.get(TAG.fNumber));
+    info.iso ??= num(t.get(TAG.iso));
+    info.focalLength ??= num(t.get(TAG.focalLength));
+    info.orientation ??= num(t.get(TAG.orientation));
+    if (ifd.kind === 'exif') {
+      info.width = num(t.get(TAG.pixelX)) ?? info.width;
+      info.height = num(t.get(TAG.pixelY)) ?? info.height;
+    } else {
+      info.width ??= num(t.get(TAG.imageWidth));
+      info.height ??= num(t.get(TAG.imageHeight));
     }
   }
-
-  function walk(ifd: number, depth: number): void {
-    if (depth > 2 || !inRange(ifd, 2)) {
-      return;
-    }
-    const n = u16(ifd);
-    if (n > 1000 || !inRange(ifd + 2, n * 12)) {
-      return;
-    }
-    for (let i = 0; i < n; i++) {
-      const e = ifd + 2 + i * 12;
-      const tag = u16(e);
-      if (tag === TAG.exifIfd) {
-        const sub = readValue(e);
-        if (typeof sub === 'number') {
-          walk(sub, depth + 1);
-        }
-        continue;
-      }
-      const v = readValue(e);
-      if (v === undefined) {
-        continue;
-      }
-      const num = typeof v === 'number' ? v : undefined;
-      const str = typeof v === 'string' && v ? v : undefined;
-      switch (tag) {
-        case TAG.make: info.make ??= str; break;
-        case TAG.model: info.model ??= str; break;
-        case TAG.lensModel: info.lens ??= str; break;
-        case TAG.dateTimeOriginal: info.dateTaken ??= str; break;
-        case TAG.exposureTime: info.exposureTime ??= num; break;
-        case TAG.fNumber: info.fNumber ??= num; break;
-        case TAG.iso: info.iso ??= num; break;
-        case TAG.focalLength: info.focalLength ??= num; break;
-        case TAG.orientation: info.orientation ??= num; break;
-        case TAG.pixelX: info.width = num ?? info.width; break;
-        case TAG.pixelY: info.height = num ?? info.height; break;
-        case TAG.imageWidth: if (depth === 0) { info.width ??= num; } break;
-        case TAG.imageHeight: if (depth === 0) { info.height ??= num; } break;
-      }
+  for (const k of Object.keys(info) as (keyof ExifInfo)[]) {
+    if (info[k] === undefined) {
+      delete info[k];
     }
   }
-
-  walk(u32(4), 0);
   return Object.keys(info).length ? info : undefined;
+}
+
+/**
+ * The small thumbnail JPEG in a JPEG's EXIF (IFD1), as a range inside `buf`. Typically
+ * 160×120. Returns undefined when absent or not fully inside `buf`.
+ */
+export function embeddedThumbnail(buf: Uint8Array): ByteRange | undefined {
+  const at = tiffBase(buf);
+  if (!at || at.base === 0) {
+    return undefined; // only for JPEG; RAW files use embeddedPreviews()
+  }
+  const ifds = readTiff(buf, at.base, at.end);
+  const ifd1 = ifds?.find((i) => i.kind === '1');
+  const off = ifd1?.tags.get(TAG.jpegOffset);
+  const len = ifd1?.tags.get(TAG.jpegLength);
+  if (typeof off !== 'number' || typeof len !== 'number' || !len) {
+    return undefined;
+  }
+  const offset = at.base + off;
+  if (offset + len > buf.length || buf[offset] !== 0xff || buf[offset + 1] !== 0xd8) {
+    return undefined;
+  }
+  return { offset, length: len };
+}
+
+/**
+ * Preview JPEGs embedded in a RAW file, largest first, as absolute file offsets. Parse the
+ * file's first bytes (256 KB); the previews themselves are usually further in and are read
+ * separately. Covers TIFF-based RAW (NEF, CR2, ARW, DNG, ORF, RW2, PEF, ...) and Fujifilm RAF.
+ */
+export function embeddedPreviews(head: Uint8Array): ByteRange[] {
+  // Fujifilm RAF: big-endian JPEG offset/length at bytes 84 and 88.
+  if (head.length >= 92 && String.fromCharCode(...head.subarray(0, 15)) === 'FUJIFILMCCD-RAW') {
+    const v = new DataView(head.buffer, head.byteOffset, head.byteLength);
+    const offset = v.getUint32(84, false);
+    const length = v.getUint32(88, false);
+    return length ? [{ offset, length }] : [];
+  }
+  const at = tiffBase(head);
+  if (!at || at.base !== 0) {
+    return [];
+  }
+  // Offsets may point past `head`: parse with an "end" far beyond so IFD values resolve when
+  // inside head, and only collect offset/length numbers (validated when the bytes are read).
+  const ifds = readTiff(head, 0, head.length) ?? [];
+  const found: ByteRange[] = [];
+  for (const ifd of ifds) {
+    const t = ifd.tags;
+    const off = t.get(TAG.jpegOffset);
+    const len = t.get(TAG.jpegLength);
+    if (typeof off === 'number' && typeof len === 'number' && len > 0) {
+      found.push({ offset: off, length: len });
+    }
+    const comp = t.get(TAG.compression);
+    const so = t.get(TAG.stripOffsets);
+    const sc = t.get(TAG.stripByteCounts);
+    // Compression 6 (old JPEG) / 7 (JPEG) stored as a single strip: a JPEG preview. Skip
+    // DNG/NEF main images that are lossless JPEG (those start with SOF3, filtered on read).
+    if ((comp === 6 || comp === 7) && typeof so === 'number' && typeof sc === 'number' && sc > 0) {
+      found.push({ offset: so, length: sc });
+    }
+  }
+  const unique = new Map(found.map((r) => [`${r.offset}:${r.length}`, r]));
+  return [...unique.values()].sort((a, b) => b.length - a.length);
+}
+
+/** True when bytes look like a baseline/progressive JPEG a browser can decode. */
+export function isBrowserJpeg(bytes: Uint8Array): boolean {
+  if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) {
+    return false;
+  }
+  // Find the first SOF marker: C0/C1/C2 are fine; C3 (lossless) is not decodable by browsers.
+  let off = 2;
+  while (off + 4 <= bytes.length && off < 65536) {
+    if (bytes[off] !== 0xff) {
+      return false;
+    }
+    const marker = bytes[off + 1];
+    if (marker === 0xc0 || marker === 0xc1 || marker === 0xc2) {
+      return true;
+    }
+    if (marker === 0xc3 || marker === 0xda) {
+      return false;
+    }
+    off += 2 + ((bytes[off + 2] << 8) | bytes[off + 3]);
+  }
+  return true; // could not tell from the start; let the decoder try
 }
 
 export function formatExposure(seconds: number): string {

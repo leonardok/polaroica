@@ -38,7 +38,7 @@ export interface DetailRow {
 /** Rows for the details panel; EXIF rows when the file has them. */
 export async function detailRows(store: PhotoStore, p: Photo): Promise<DetailRow[]> {
   const rows: DetailRow[] = [];
-  const exif = await store.exif(p.uri);
+  const exif = await store.exif(p.uri, p.size, p.mtime);
   if (exif?.dateTaken) {
     rows.push({ label: 'Taken', value: formatExifDate(exif.dateTaken) });
   }

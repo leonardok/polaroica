@@ -5,6 +5,8 @@ import { detailRows, toView } from './details';
 import { Libraries } from './libraries';
 import { Mover } from './move';
 import { Photo, PhotoStore, sortSetting } from './photoStore';
+import { Thumb } from './core/cache';
+import { ThumbJob, ThumbService } from './thumbs';
 import { localRoots, webviewHtml } from './webview';
 
 type FromGrid =
@@ -15,6 +17,8 @@ type FromGrid =
   | { type: 'reveal'; name: string }
   | { type: 'sort'; key: SortKey }
   | { type: 'tileSize'; size: number }
+  | { type: 'onscreen'; names: string[] }
+  | { type: 'decoded'; id: number; data?: Uint8Array; w?: number; h?: number }
   | { type: 'refresh' };
 
 export interface GridHost {
@@ -32,6 +36,7 @@ export class GridPanels implements vscode.Disposable {
     private readonly libraries: Libraries,
     private readonly store: PhotoStore,
     private readonly mover: Mover,
+    private readonly thumbs: ThumbService,
   ) {
     this.status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
     context.subscriptions.push(
@@ -73,6 +78,7 @@ export class GridPanels implements vscode.Disposable {
     const grid = new GridPanel(panel, folder, this);
     this.panels.set(folder.fsPath, grid);
     panel.onDidDispose(() => {
+      grid.dispose();
       this.panels.delete(folder.fsPath);
       this.updateStatus();
     });
@@ -80,6 +86,9 @@ export class GridPanels implements vscode.Disposable {
       this.updateStatus();
       // Stop pulling photos over the network while the grid is not on screen.
       void panel.webview.postMessage({ type: 'visible', visible: e.webviewPanel.visible });
+      if (e.webviewPanel.visible) {
+        grid.job.resume();
+      }
     });
   }
 
@@ -108,7 +117,7 @@ export class GridPanels implements vscode.Disposable {
 
   // shared by panels
   get ctx() {
-    return { context: this.context, libraries: this.libraries, store: this.store, mover: this.mover, host: this.host };
+    return { context: this.context, libraries: this.libraries, store: this.store, mover: this.mover, host: this.host, thumbs: this.thumbs };
   }
 
   dispose(): void {
@@ -124,6 +133,9 @@ class GridPanel {
   selected: string[] = [];
   private sort: SortKey = sortSetting();
   private focus?: string;
+  readonly job: ThumbJob;
+  private nextId = 1;
+  private readonly pending = new Map<number, (t: Thumb | undefined) => void>();
 
   constructor(
     readonly panel: vscode.WebviewPanel,
@@ -138,6 +150,33 @@ class GridPanel {
       body: '<div id="app"></div>',
     });
     panel.webview.onDidReceiveMessage((m: FromGrid) => this.onMessage(m));
+    this.job = owner.ctx.thumbs.job(folder, {
+      send: (items) => void panel.webview.postMessage({ type: 'thumbs', items }),
+      decode: (name, data, mime, px) =>
+        new Promise<Thumb | undefined>((resolve) => {
+          const id = this.nextId++;
+          const timer = setTimeout(() => {
+            this.pending.delete(id);
+            resolve(undefined);
+          }, 60000);
+          this.pending.set(id, (t) => {
+            clearTimeout(timer);
+            resolve(t);
+          });
+          void panel.webview.postMessage({ type: 'decode', id, name, mime, px, data });
+        }),
+      get active() {
+        return panel.visible;
+      },
+    });
+  }
+
+  dispose(): void {
+    this.job.dispose();
+    for (const resolve of this.pending.values()) {
+      resolve(undefined);
+    }
+    this.pending.clear();
   }
 
   private get webview() {
@@ -161,9 +200,12 @@ class GridPanel {
       sort: this.sort,
       tileSize,
       selected: this.selected,
-      photos: this.photos.map((p) => toView(this.webview, p)),
+      photos: this.photos.map((p) => ({ ...toView(this.webview, p), src: undefined })),
     });
     this.owner.updateStatus();
+    this.job.setPhotos(this.photos);
+    // Shown from the local index: check the share for edited files in the background.
+    void store.revalidate(this.folder, true);
     await this.sendDetails();
   }
 
@@ -174,10 +216,14 @@ class GridPanel {
       void this.webview.postMessage({ type: 'details', details: undefined });
       return;
     }
-    const rows = await detailRows(this.owner.ctx.store, photo);
+    const [rows, thumbs] = await Promise.all([
+      detailRows(this.owner.ctx.store, photo),
+      this.owner.ctx.thumbs.cached(this.folder, [photo]),
+    ]);
+    const view = { ...toView(this.webview, photo), src: undefined }; // never load the original here
     void this.webview.postMessage({
       type: 'details',
-      details: { photo: toView(this.webview, photo), rows, more: this.selected.length - 1 },
+      details: { photo: view, rows, more: this.selected.length - 1, thumb: thumbs.get(photo.name)?.data },
     });
   }
 
@@ -189,8 +235,17 @@ class GridPanel {
         await this.reload();
         break;
       case 'refresh':
-        this.owner.ctx.store.invalidate(this.folder);
+        await this.owner.ctx.store.recheck(this.folder);
         break;
+      case 'onscreen':
+        this.job.setVisible(m.names);
+        break;
+      case 'decoded': {
+        const resolve = this.pending.get(m.id);
+        this.pending.delete(m.id);
+        resolve?.(m.data && m.w && m.h ? { data: Buffer.from(m.data), w: m.w, h: m.h } : undefined);
+        break;
+      }
       case 'open':
         host?.openPhoto(this.folder, m.name, this.sort);
         break;

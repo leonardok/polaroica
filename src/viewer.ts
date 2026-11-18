@@ -5,6 +5,8 @@ import { detailRows, toView } from './details';
 import { Libraries } from './libraries';
 import { Mover } from './move';
 import { Photo, PhotoStore } from './photoStore';
+import { isDisplayable, isRaw } from './core/images';
+import { rawPreview, ThumbService } from './thumbs';
 import { localRoots, webviewHtml } from './webview';
 
 type FromViewer =
@@ -26,6 +28,7 @@ export class PhotoViewers implements vscode.Disposable {
     readonly libraries: Libraries,
     readonly store: PhotoStore,
     readonly mover: Mover,
+    readonly thumbs: ThumbService,
   ) {
     context.subscriptions.push(
       store.onDidChange((folder) => {
@@ -138,19 +141,61 @@ class PhotoViewer {
     this.panel.title = photo.name;
     const from = Math.max(0, this.index - STRIP_RADIUS);
     const to = Math.min(this.photos.length, this.index + STRIP_RADIUS + 1);
-    const strip = this.photos.slice(from, to).map((p, k) => ({ index: from + k, ...toView(webview, p) }));
+    const near = this.photos.slice(from, to);
+    // Thumbnails come from the local cache: the filmstrip and a stand-in for the main photo
+    // show at once, while the original streams in from the share.
+    const cached = await this.owner.thumbs.cached(this.folder, near);
+    if (this.current !== photo) {
+      return; // moved on while reading
+    }
+    const view = toView(webview, photo);
+    const raw = isRaw(photo.name);
+    const neighbours = [this.photos[this.index + 1], this.photos[this.index - 1]]
+      .filter((p): p is Photo => !!p && isDisplayable(p.name))
+      .map((p) => webview.asWebviewUri(p.uri).toString());
     void webview.postMessage({
       type: 'show',
       crumbs: this.owner.libraries.crumbs(this.folder),
       index: this.index,
       total: this.photos.length,
-      photo: toView(webview, photo),
-      strip,
+      photo: view,
+      thumb: cached.get(photo.name)?.data,
+      // RAW: the preview JPEG embedded in the file is sent separately once read.
+      waitForPreview: raw,
+      strip: near.map((p, k) => ({
+        index: from + k,
+        name: p.name,
+        ext: toView(webview, p).ext,
+        thumb: cached.get(p.name)?.data,
+      })),
+      preload: neighbours,
     });
-    const rows = await detailRows(this.owner.store, photo);
-    if (this.current === photo) {
-      void webview.postMessage({ type: 'details', rows });
+
+    const work: Promise<unknown>[] = [
+      detailRows(this.owner.store, photo).then((rows) => {
+        if (this.current === photo) {
+          void webview.postMessage({ type: 'details', rows });
+        }
+      }),
+    ];
+    if (raw) {
+      work.push(
+        rawPreview(photo.uri.fsPath).then((data) => {
+          if (this.current === photo) {
+            void webview.postMessage({ type: 'preview', name: photo.name, data });
+          }
+        }),
+      );
+    } else if (!cached.has(photo.name)) {
+      work.push(
+        this.owner.thumbs.placeholder(photo).then((data) => {
+          if (data && this.current === photo) {
+            void webview.postMessage({ type: 'placeholder', name: photo.name, data });
+          }
+        }),
+      );
     }
+    await Promise.all(work);
   }
 
   private async onMessage(m: FromViewer): Promise<void> {

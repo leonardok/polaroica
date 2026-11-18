@@ -3,16 +3,23 @@ import * as vscode from 'vscode';
 import { GridPanels } from './grid';
 import { Libraries } from './libraries';
 import { Mover } from './move';
+import { CacheManager } from './core/cache';
+import { formatBytes } from './core/images';
 import { PhotoStore } from './photoStore';
+import { ThumbService } from './thumbs';
 import { FolderNode, LibraryNode, LibraryTree, TreeNode } from './tree';
 import { PhotoViewers } from './viewer';
 
 export function activate(context: vscode.ExtensionContext): void {
   const libraries = new Libraries(context);
-  const store = new PhotoStore();
+  const cacheDir = vscode.Uri.joinPath(context.globalStorageUri, 'cache-v1').fsPath;
+  const capMb = () => vscode.workspace.getConfiguration('vsphoto').get<number>('cacheSizeMB', 512);
+  const cache = new CacheManager(cacheDir, capMb() * 1024 * 1024);
+  const store = new PhotoStore(cache);
+  const thumbs = new ThumbService(store);
   const mover = new Mover(context, libraries, store);
-  const grids = new GridPanels(context, libraries, store, mover);
-  const viewers = new PhotoViewers(context, libraries, store, mover);
+  const grids = new GridPanels(context, libraries, store, mover, thumbs);
+  const viewers = new PhotoViewers(context, libraries, store, mover, thumbs);
   grids.setHost({ openPhoto: (folder, name, sort) => viewers.open(folder, name, sort) });
 
   const tree = new LibraryTree(libraries, store, async (files, target) => {
@@ -67,13 +74,30 @@ export function activate(context: vscode.ExtensionContext): void {
       tree.refresh();
     }),
     vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration('vsphoto')) {
+      if (e.affectsConfiguration('vsphoto.cacheSizeMB')) {
+        cache.setCap(capMb() * 1024 * 1024);
+      }
+      if (e.affectsConfiguration('vsphoto.showPhotoCounts') || e.affectsConfiguration('vsphoto.sortBy')) {
         tree.refresh();
       }
     }),
 
     vscode.commands.registerCommand('vsphoto.addLibrary', () => libraries.add()),
     vscode.commands.registerCommand('vsphoto.refresh', () => tree.refresh()),
+    vscode.commands.registerCommand('vsphoto.cacheInfo', async () => {
+      const s = await cache.stats();
+      const clear = 'Clear Cache';
+      const pick = await vscode.window.showInformationMessage(
+        `Photo Library cache: ${formatBytes(s.bytes)} of ${capMb()} MB, ${s.folders.toLocaleString()} folders` +
+          (s.avgThumbBytes ? `, about ${formatBytes(s.avgThumbBytes)} per thumbnail` : ''),
+        { detail: cacheDir },
+        clear,
+      );
+      if (pick === clear) {
+        await cache.clear();
+        store.invalidate();
+      }
+    }),
     vscode.commands.registerCommand('vsphoto.removeLibrary', async (node?: TreeNode) => {
       const target = node instanceof LibraryNode ? node : view.selection.find((n) => n instanceof LibraryNode);
       if (target instanceof LibraryNode) {

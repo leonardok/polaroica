@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { cameraLabel, formatExifDate, formatExposure, readExif } from '../core/exif';
+import { cameraLabel, embeddedPreviews, embeddedThumbnail, formatExifDate, formatExposure, isBrowserJpeg, readExif } from '../core/exif';
 import { compareNames, extensionOf, isDisplayable, isHiddenFolder, isPhoto, isRaw, nextFreeName, sortPhotos } from '../core/images';
 import { candidateLocalPaths, defaultLibraryName, formatUnc, looksLikeNetworkPath, parseSmbAddress } from '../core/smb';
 
@@ -149,4 +149,52 @@ test('format exposure and dates', () => {
   assert.equal(formatExposure(2.5), '2.5s');
   assert.equal(formatExifDate('2026:10:14 07:42:10'), '2026-10-14 07:42');
   assert.equal(cameraLabel({ make: 'Canon', model: 'EOS R5' }), 'Canon EOS R5');
+});
+
+/** TIFF with IFD0 (Make) -> IFD1 holding a tiny "JPEG" at a known offset. */
+function tiffWithThumbnail(): { tiff: Uint8Array; jpegAt: number; jpeg: Uint8Array } {
+  const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xc0, 0, 2, 0xff, 0xd9]);
+  const buf = new Uint8Array(200);
+  const v = new DataView(buf.buffer);
+  buf.set([0x49, 0x49, 0x2a, 0x00]);
+  v.setUint32(4, 8, true);
+  // IFD0: one entry (Orientation = 1), next IFD at 26
+  v.setUint16(8, 1, true);
+  v.setUint16(10, 0x0112, true); v.setUint16(12, 3, true); v.setUint32(14, 1, true); v.setUint16(18, 1, true);
+  v.setUint32(22, 26, true);
+  // IFD1 at 26: JPEGInterchangeFormat (offset 100), JPEGInterchangeFormatLength
+  v.setUint16(26, 2, true);
+  v.setUint16(28, 0x0201, true); v.setUint16(30, 4, true); v.setUint32(32, 1, true); v.setUint32(36, 100, true);
+  v.setUint16(40, 0x0202, true); v.setUint16(42, 4, true); v.setUint32(44, 1, true); v.setUint32(48, jpeg.length, true);
+  v.setUint32(52, 0, true);
+  buf.set(jpeg, 100);
+  return { tiff: buf, jpegAt: 100, jpeg };
+}
+
+test('embedded EXIF thumbnail (JPEG) and RAW previews', () => {
+  const { tiff, jpegAt, jpeg } = tiffWithThumbnail();
+  // As a JPEG: APP1 Exif segment holding the TIFF.
+  const app1Len = 2 + 6 + tiff.length;
+  const file = new Uint8Array(4 + app1Len + 2);
+  file.set([0xff, 0xd8, 0xff, 0xe1, app1Len >> 8, app1Len & 0xff]);
+  file.set([0x45, 0x78, 0x69, 0x66, 0, 0], 6);
+  file.set(tiff, 12);
+  const r = embeddedThumbnail(file);
+  assert.ok(r);
+  assert.deepEqual(file.slice(r.offset, r.offset + r.length), jpeg);
+
+  // As a TIFF-based RAW: the same IFD1 JPEG is a preview candidate at an absolute offset.
+  const previews = embeddedPreviews(tiff);
+  assert.deepEqual(previews, [{ offset: jpegAt, length: jpeg.length }]);
+  assert.equal(embeddedThumbnail(tiff), undefined, 'RAW previews come from embeddedPreviews');
+
+  // Fujifilm RAF header.
+  const raf = new Uint8Array(100);
+  raf.set(Array.from('FUJIFILMCCD-RAW', (c) => c.charCodeAt(0)));
+  new DataView(raf.buffer).setUint32(84, 5000, false);
+  new DataView(raf.buffer).setUint32(88, 1234, false);
+  assert.deepEqual(embeddedPreviews(raf), [{ offset: 5000, length: 1234 }]);
+
+  assert.ok(isBrowserJpeg(jpeg));
+  assert.ok(!isBrowserJpeg(new Uint8Array([0xff, 0xd8, 0xff, 0xc3, 0, 2])), 'lossless JPEG (RAW sensor data)');
 });

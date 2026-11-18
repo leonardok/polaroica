@@ -1,7 +1,7 @@
-// Library view: photo grid for one folder.
+// Library view: photo grid for one folder. Shows thumbnails only (never the originals): the
+// extension sends cached ones, placeholders, and asks this page to decode + shrink the rest.
 (function () {
-  const { vscode, h, icon, crumbs, detailsList, picture, createLoader } = window.vsphoto;
-  const loader = createLoader(4);
+  const { vscode, h, icon, crumbs, detailsList, blobUrl, makeThumbnail } = window.vsphoto;
   const app = document.getElementById('app');
 
   let photos = [];
@@ -11,11 +11,67 @@
   let sort = 'name';
   let tileSize = (vscode.getState() || {}).tileSize || 160;
   let tiles = [];
+  let tileByName = new Map();
   let gridEl, detailsEl, countEl;
+  /** name -> { url, kind: 'thumb' | 'placeholder' }. Kept across re-renders of the same folder. */
+  const thumbs = new Map();
+  const onScreen = new Set();
+  let observer;
+  let reportTimer;
 
-  function post(msg) {
-    vscode.postMessage(msg);
+  const post = (msg) => vscode.postMessage(msg);
+
+  // ---- thumbnails --------------------------------------------------------------------
+
+  function applyThumb(tile, name) {
+    const t = thumbs.get(name);
+    if (!t) {
+      return;
+    }
+    const img = tile.querySelector('img');
+    if (img.getAttribute('src') !== t.url) {
+      img.src = t.url;
+    }
+    tile.classList.add('has-thumb');
+    tile.classList.toggle('is-placeholder', t.kind === 'placeholder');
   }
+
+  function receiveThumbs(items) {
+    for (const it of items) {
+      const prev = thumbs.get(it.name);
+      if (prev && prev.kind === 'thumb' && it.kind === 'placeholder') {
+        continue;
+      }
+      if (prev) {
+        URL.revokeObjectURL(prev.url);
+      }
+      thumbs.set(it.name, { url: blobUrl(it.data, it.mime), kind: it.kind });
+      const tile = tileByName.get(it.name);
+      if (tile) {
+        applyThumb(tile, it.name);
+      }
+    }
+  }
+
+  async function decode(m) {
+    try {
+      const t = await makeThumbnail(m.data, m.mime, m.px);
+      post({ type: 'decoded', id: m.id, data: t.data, w: t.w, h: t.h });
+    } catch {
+      post({ type: 'decoded', id: m.id });
+    }
+  }
+
+  /** Tell the extension which photos are on (or near) screen, top to bottom. */
+  function reportOnScreen() {
+    clearTimeout(reportTimer);
+    reportTimer = setTimeout(() => {
+      const idx = [...onScreen].sort((a, b) => a - b);
+      post({ type: 'onscreen', names: idx.map((i) => photos[i].name) });
+    }, 60);
+  }
+
+  // ---- selection ---------------------------------------------------------------------
 
   function sendSelection() {
     const focus = focusIndex >= 0 ? photos[focusIndex]?.name : undefined;
@@ -68,6 +124,7 @@
     }
     const next = Math.max(0, Math.min(photos.length - 1, (focusIndex < 0 ? 0 : focusIndex) + delta));
     tiles[next].focus();
+    tiles[next].scrollIntoView({ block: 'nearest' });
     select(next, null);
   }
 
@@ -83,14 +140,22 @@
     return Math.max(1, c);
   }
 
+  // ---- rendering ---------------------------------------------------------------------
+
   function render(state) {
-    loader.reset();
     photos = state.photos;
     sort = state.sort;
     if (!(vscode.getState() || {}).tileSize && state.tileSize) {
       tileSize = state.tileSize;
     }
-    selected = new Set((state.selected || []).filter((n) => photos.some((p) => p.name === n)));
+    const names = new Set(photos.map((p) => p.name));
+    for (const [name, t] of thumbs) {
+      if (!names.has(name)) {
+        URL.revokeObjectURL(t.url);
+        thumbs.delete(name);
+      }
+    }
+    selected = new Set((state.selected || []).filter((n) => names.has(n)));
 
     const sortSel = h(
       'select',
@@ -104,7 +169,7 @@
     const size = h('input', {
       type: 'range',
       min: '90',
-      max: '320',
+      max: '280',
       step: '10',
       value: String(tileSize),
       'aria-label': 'Thumbnail size',
@@ -125,8 +190,29 @@
       onkeydown: onKey,
     });
     gridEl.style.setProperty('--tile', tileSize + 'px');
-    tiles = photos.map((p, i) =>
-      h(
+
+    if (observer) {
+      observer.disconnect();
+    }
+    onScreen.clear();
+    observer = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          const i = Number(e.target.dataset.i);
+          if (e.isIntersecting) {
+            onScreen.add(i);
+          } else {
+            onScreen.delete(i);
+          }
+        }
+        reportOnScreen();
+      },
+      { rootMargin: '600px 0px' },
+    );
+
+    tileByName = new Map();
+    tiles = photos.map((p, i) => {
+      const tile = h(
         'button',
         {
           class: 'tile',
@@ -138,10 +224,19 @@
           ondblclick: () => post({ type: 'open', name: p.name }),
           ondragstart: (e) => onDragStart(e, i),
         },
-        h('span', { class: 'thumb' }, picture(p, 'thumb-img', loader)),
+        h(
+          'span',
+          { class: 'thumb' },
+          h('img', { class: 'thumb-img', alt: '', decoding: 'async', draggable: 'false' }),
+          h('span', { class: 'thumb-label', 'aria-hidden': 'true' }, icon('photo', 20), p.ext || ''),
+        ),
         h('span', { class: 'label' }, p.name),
-      ),
-    );
+      );
+      tileByName.set(p.name, tile);
+      applyThumb(tile, p.name);
+      observer.observe(tile);
+      return tile;
+    });
     gridEl.append(...tiles);
 
     detailsEl = h('aside', { class: 'details', 'aria-label': 'Photo details' }, h('h2', {}, 'DETAILS'), h('p', { class: 'sub' }, 'Select a photo to see its details.'));
@@ -212,9 +307,14 @@
       return;
     }
     const names = [...selected];
+    const known = thumbs.get(d.photo.name);
+    const url = d.thumb ? blobUrl(d.thumb, 'image/webp') : known?.url;
+    const preview = url
+      ? h('img', { class: 'preview', src: url, alt: '' })
+      : h('div', { class: 'preview raw-placeholder', 'aria-hidden': 'true' }, icon('photo', 22), d.photo.ext);
     detailsEl.replaceChildren(
       h('h2', {}, 'DETAILS'),
-      picture(d.photo, 'preview', false),
+      preview,
       h('div', {}, h('div', { class: 'name' }, d.photo.name), d.more > 0 ? h('div', { class: 'sub' }, `+ ${d.more} more selected`) : null),
       detailsList(d.rows),
       h(
@@ -229,16 +329,29 @@
 
   window.addEventListener('message', (e) => {
     const m = e.data;
-    if (m.type === 'init') {
-      render(m);
-    } else if (m.type === 'details') {
-      if (detailsEl) {
-        renderDetails(m.details);
-      }
-    } else if (m.type === 'visible') {
-      loader.setPaused(!m.visible);
-    } else if (m.type === 'error') {
-      app.replaceChildren(h('div', { class: 'message' }, m.message));
+    switch (m.type) {
+      case 'init':
+        render(m);
+        break;
+      case 'thumbs':
+        receiveThumbs(m.items);
+        break;
+      case 'decode':
+        void decode(m);
+        break;
+      case 'details':
+        if (detailsEl) {
+          renderDetails(m.details);
+        }
+        break;
+      case 'visible':
+        if (m.visible) {
+          reportOnScreen();
+        }
+        break;
+      case 'error':
+        app.replaceChildren(h('div', { class: 'message' }, m.message));
+        break;
     }
   });
 

@@ -4,6 +4,7 @@ import * as vscode from 'vscode';
 import { nextFreeName } from './core/images';
 import { Libraries } from './libraries';
 import { PhotoStore } from './photoStore';
+import { thumbPx } from './thumbs';
 
 const RECENT_TARGETS = 'vsphoto.recentMoveTargets';
 
@@ -89,8 +90,12 @@ export class Mover {
             dest = vscode.Uri.file(path.join(target.fsPath, nextFreeName(name, (n) => taken.has(n))));
           }
           try {
+            const before = await fs.promises.stat(src.fsPath).catch(() => undefined);
             await moveOne(src, dest);
             result.moved.push({ from: src, to: dest });
+            if (before?.isFile()) {
+              await this.carryThumbnail(src, dest, before);
+            }
           } catch (err) {
             result.skipped.push(src);
             const msg = err instanceof Error ? err.message : String(err);
@@ -106,7 +111,6 @@ export class Mover {
     const touched = new Set<string>([target.fsPath]);
     for (const m of result.moved) {
       touched.add(path.dirname(m.from.fsPath));
-      this.store.forgetFile(m.from);
     }
     for (const f of touched) {
       this.store.invalidate(vscode.Uri.file(f));
@@ -122,6 +126,20 @@ export class Mover {
       );
     }
     return result;
+  }
+
+  /** Moves the cached thumbnail with the photo, so it is not generated again. */
+  private async carryThumbnail(src: vscode.Uri, dest: vscode.Uri, before: fs.Stats): Promise<void> {
+    try {
+      const after = await fs.promises.stat(dest.fsPath);
+      await this.store.cache.moveThumb(
+        { folder: path.dirname(src.fsPath), name: path.basename(src.fsPath), size: before.size, mtime: Math.round(before.mtimeMs) },
+        { folder: path.dirname(dest.fsPath), name: path.basename(dest.fsPath), size: after.size, mtime: Math.round(after.mtimeMs) },
+        thumbPx(),
+      );
+    } catch {
+      /* the thumbnail will simply be made again */
+    }
   }
 
   /** Folder picker that walks the libraries one level at a time (no full scan of a share). */
