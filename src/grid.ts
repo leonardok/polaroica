@@ -103,7 +103,7 @@ export class GridPanels implements vscode.Disposable {
       return;
     }
     const panel = vscode.window.createWebviewPanel(
-      'vsphoto.grid',
+      'polaroica.grid',
       path.basename(folder.fsPath) || folder.fsPath,
       { viewColumn: vscode.ViewColumn.Active, preserveFocus: false },
       { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: localRoots(this.context.extensionUri) },
@@ -338,7 +338,7 @@ class GridPanel {
     }
     const names = new Set(this.photos.map((p) => p.name));
     this.selected = this.selected.filter((n) => names.has(n));
-    const tileSize = this.owner.ctx.context.globalState.get<number>('vsphoto.tileSize', 160);
+    const tileSize = this.owner.ctx.context.globalState.get<number>('polaroica.tileSize', 160);
     const cull = (await this.owner.ctx.edits?.cullingIn(this.folder.fsPath)) ?? new Map();
     this.cull = new Map(cull);
     // Each photo's shape, so the justified grid is laid out right before thumbnails arrive.
@@ -457,7 +457,7 @@ class GridPanel {
         host?.makeBest?.(this.folder, m.name);
         break;
       case 'tileSize':
-        await context.globalState.update('vsphoto.tileSize', m.size);
+        await context.globalState.update('polaroica.tileSize', m.size);
         break;
       case 'detailsWidth':
         await context.globalState.update(DETAILS_WIDTH, Math.max(0, Math.round(m.width)) || undefined);

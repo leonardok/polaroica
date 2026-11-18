@@ -2,11 +2,11 @@
 // The cached thumbnail shows at once, scaled up, while the original streams in from the share.
 // With ADJUST open, or when the photo has edits, the photo is drawn with WebGL (adjust.js).
 (function () {
-  const { vscode, h, icon, crumbs, detailsList, panelResizer, closedByDefault, sectionOpen, blobUrl, section, photoContext, rankExplanation, keyBelongsToControl } = window.vsphoto;
+  const { vscode, h, icon, crumbs, detailsList, panelResizer, closedByDefault, sectionOpen, blobUrl, section, photoContext, rankExplanation, keyBelongsToControl } = window.polaroica;
   // The photo tab opens with only ADJUST expanded; DETAILS and AUTO-RANK stay folded until opened.
   closedByDefault.add('details');
   closedByDefault.add('autorank');
-  const A = window.vsphotoAdjust;
+  const A = window.polaroicaAdjust;
   const app = document.getElementById('app');
   // 'fit', 'full' (one photo pixel per screen pixel) or a pinch-zoom scale (CSS px per photo px).
   let zoom = (vscode.getState() || {}).zoom || 'fit';

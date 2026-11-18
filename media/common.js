@@ -1,4 +1,4 @@
-// Shared helpers for the Photo Library webviews. Loaded before grid.js / viewer.js.
+// Shared helpers for the Polaroica webviews. Loaded before grid.js / viewer.js.
 /* global acquireVsCodeApi */
 (function () {
   const vscode = acquireVsCodeApi();
@@ -361,5 +361,5 @@
     return navKey && (tag === 'SELECT' || (tag === 'INPUT' && t.type === 'range'));
   }
 
-  window.vsphoto = { vscode, h, icon, crumbs, detailsList, panelResizer, closedByDefault, sectionOpen, picture, blobUrl, bytes, makeThumbnail, section, photoContext, radar, rankExplanation, keyBelongsToControl };
+  window.polaroica = { vscode, h, icon, crumbs, detailsList, panelResizer, closedByDefault, sectionOpen, picture, blobUrl, bytes, makeThumbnail, section, photoContext, radar, rankExplanation, keyBelongsToControl };
 })();

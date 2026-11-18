@@ -9,7 +9,7 @@ import { EditStore } from './edits';
 import { Libraries } from './libraries';
 import { mapLimit, PhotoStore } from './photoStore';
 
-const RECENT_TARGETS = 'vsphoto.recentExportTargets';
+const RECENT_TARGETS = 'polaroica.recentExportTargets';
 
 /** Photos that can be exported: JPEGs and RAW files. */
 export function isExportable(name: string): boolean {
@@ -118,7 +118,7 @@ export class PhotoExporter {
   }
 
   private async run(files: vscode.Uri[], target: vscode.Uri, maxSide: number | undefined): Promise<void> {
-    const quality = Math.max(50, Math.min(100, vscode.workspace.getConfiguration('vsphoto').get<number>('export.quality', 90)));
+    const quality = Math.max(50, Math.min(100, vscode.workspace.getConfiguration('polaroica').get<number>('export.quality', 90)));
     const where = this.libraries.libraryOf(target) ? this.libraries.crumbs(target).join(' / ') : target.fsPath;
     const n = files.length;
 

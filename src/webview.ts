@@ -27,7 +27,7 @@ function asset(extensionUri: vscode.Uri, file: string): string {
  * resources share one loader, and photos streaming from a slow share must not hold up the UI.
  */
 /** globalState key: the side panel's width in the grid and photo tabs (px; unset = default). */
-export const DETAILS_WIDTH = 'vsphoto.detailsWidth';
+export const DETAILS_WIDTH = 'polaroica.detailsWidth';
 
 export function webviewHtml(
   webview: vscode.Webview,

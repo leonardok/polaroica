@@ -47,7 +47,7 @@ test('Kelvin white balance round-trips through the sidecar', () => {
   e.kelvinRef = 3220;
   const xml = toXmp(e);
   assert.match(xml, /crs:Temperature="4500"/);
-  assert.match(xml, /vsphoto:TemperatureRef="3220"/);
+  assert.match(xml, /polaroica:TemperatureRef="3220"/);
   assert.deepEqual(fromXmp(xml), e);
   assert.ok(!isDefault(e));
   // As shot (same as the reference) is no edit at all.

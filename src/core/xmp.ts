@@ -179,12 +179,12 @@ export function toXmp(input: Edits | Sidecar): string {
   const attrs = [
     ...SLIDERS.map((k) => `   crs:${SLIDER_TAGS[k]}="${signed(e[k], k === 'exposure' ? 2 : 0)}"`),
     // Kelvin, as Camera Raw writes it, plus the temperature it was set against.
-    ...(hasKelvin(e) ? [`   crs:Temperature="${e.kelvin}"`, `   vsphoto:TemperatureRef="${e.kelvinRef}"`] : []),
+    ...(hasKelvin(e) ? [`   crs:Temperature="${e.kelvin}"`, `   polaroica:TemperatureRef="${e.kelvinRef}"`] : []),
   ].join('\n');
   const culling = [
     `   xmp:Rating="${sc.rating}"`,
-    sc.flag ? `   vsphoto:Flag="${sc.flag}"` : '',
-    sc.auto ? `   vsphoto:AutoRank="${escapeAttr(JSON.stringify(sc.auto))}"` : '',
+    sc.flag ? `   polaroica:Flag="${sc.flag}"` : '',
+    sc.auto ? `   polaroica:AutoRank="${escapeAttr(JSON.stringify(sc.auto))}"` : '',
   ]
     .filter(Boolean)
     .join('\n');
@@ -197,13 +197,13 @@ export function toXmp(input: Edits | Sidecar): string {
     )
     .join('\n');
   return `<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>
-<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="vsphoto">
+<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="polaroica">
  <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
   <rdf:Description rdf:about=""
    xmlns:xmp="http://ns.adobe.com/xap/1.0/"
    xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/"
-   xmlns:vsphoto="https://github.com/leonardok/vsphoto/ns/1.0/"
-   vsphoto:version="1"
+   xmlns:polaroica="https://github.com/leonardok/polaroica/ns/1.0/"
+   polaroica:version="1"
    crs:HasSettings="True"
 ${culling}
 ${attrs}>
@@ -238,7 +238,7 @@ export function readSidecar(text: string): Sidecar {
   }
   raw.curves = curves;
   const kelvin = /crs:Temperature\s*=\s*"(\d+)"/.exec(text);
-  const ref = /vsphoto:TemperatureRef\s*=\s*"(\d+)"/.exec(text);
+  const ref = /(?:polaroica|vsphoto):TemperatureRef\s*=\s*"(\d+)"/.exec(text);
   if (kelvin && ref) {
     raw.kelvin = Number(kelvin[1]);
     raw.kelvinRef = Number(ref[1]);
@@ -248,11 +248,11 @@ export function readSidecar(text: string): Sidecar {
   if (rating) {
     sc.rating = Math.max(0, Math.min(5, Number(rating[1])));
   }
-  const flag = /vsphoto:Flag\s*=\s*"(pick|reject)"/.exec(text);
+  const flag = /(?:polaroica|vsphoto):Flag\s*=\s*"(pick|reject)"/.exec(text);
   if (flag) {
     sc.flag = flag[1] as Flag;
   }
-  const auto = /vsphoto:AutoRank\s*=\s*"([^"]*)"/.exec(text);
+  const auto = /(?:polaroica|vsphoto):AutoRank\s*=\s*"([^"]*)"/.exec(text);
   if (auto) {
     try {
       sc.auto = JSON.parse(unescapeAttr(auto[1])) as AutoRank;

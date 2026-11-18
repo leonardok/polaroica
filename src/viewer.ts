@@ -102,7 +102,7 @@ export class PhotoViewers implements vscode.Disposable {
       }
     }
     const panel = vscode.window.createWebviewPanel(
-      'vsphoto.photo',
+      'polaroica.photo',
       name,
       { viewColumn: vscode.ViewColumn.Active, preserveFocus: false },
       { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: localRoots(this.context.extensionUri) },
@@ -291,7 +291,7 @@ class PhotoViewer {
         }
         break;
       case 'grid':
-        await vscode.commands.executeCommand('vsphoto.openFolder', this.folder);
+        await vscode.commands.executeCommand('polaroica.openFolder', this.folder);
         break;
       case 'needBytes': {
         // The editor renders with WebGL from the photo's bytes (a blob, so the canvas is never

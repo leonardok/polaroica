@@ -9,7 +9,7 @@ import { Photo, PhotoStore, readHead, readRange } from './photoStore';
 
 /** Long edge of generated thumbnails, in pixels. */
 export function thumbPx(): number {
-  const v = vscode.workspace.getConfiguration('vsphoto').get<number>('thumbnailSize', 256);
+  const v = vscode.workspace.getConfiguration('polaroica').get<number>('thumbnailSize', 256);
   return [192, 256, 320].includes(v) ? v : 256;
 }
 
@@ -194,7 +194,7 @@ export class ThumbService {
   }
 
   private fallbacksLogged = 0;
-  /** Written to the "Photo Library" output channel: why a photo needed a full read. */
+  /** Written to the "Polaroica" output channel: why a photo needed a full read. */
   log?: (line: string) => void;
 
   private logFallback(photo: Photo, why: string, head: Uint8Array): void {

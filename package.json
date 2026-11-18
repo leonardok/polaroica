@@ -1,18 +1,18 @@
 {
-  "name": "vsphoto",
-  "displayName": "Photo Library",
+  "name": "polaroica",
+  "displayName": "Polaroica",
   "description": "Browse and organize photo libraries — local folders and SMB network shares — inside VS Code.",
   "version": "0.10.2",
   "publisher": "leonardok",
-  "license": "GPL-3.0-or-later",
   "icon": "media/icon.png",
   "galleryBanner": {
-    "color": "#11143a",
+    "color": "#1c1917",
     "theme": "dark"
   },
+  "license": "GPL-3.0-or-later",
   "repository": {
     "type": "git",
-    "url": "https://github.com/leonardok/vsphoto"
+    "url": "https://github.com/leonardok/polaroica"
   },
   "engines": {
     "vscode": "^1.85.0"
@@ -35,255 +35,255 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "vsphoto",
-          "title": "Photo Library",
+          "id": "polaroica",
+          "title": "Polaroica",
           "icon": "media/library.svg"
         }
       ]
     },
     "views": {
-      "vsphoto": [
+      "polaroica": [
         {
-          "id": "vsphoto.libraries",
-          "name": "Photo Libraries",
+          "id": "polaroica.libraries",
+          "name": "Libraries",
           "icon": "media/library.svg"
         }
       ]
     },
     "viewsWelcome": [
       {
-        "view": "vsphoto.libraries",
-        "contents": "No photo libraries yet. A library is a local folder or an SMB share your computer can already reach.\n[Add Library](command:vsphoto.addLibrary)",
+        "view": "polaroica.libraries",
+        "contents": "No photo libraries yet. A library is a local folder or an SMB share your computer can already reach.\n[Add Library](command:polaroica.addLibrary)",
         "when": "workbenchState == empty || workspaceFolderCount == 0"
       }
     ],
     "commands": [
       {
-        "command": "vsphoto.addLibrary",
+        "command": "polaroica.addLibrary",
         "title": "Add Library…",
-        "category": "Photo Library",
+        "category": "Polaroica",
         "icon": "$(add)"
       },
       {
-        "command": "vsphoto.refresh",
+        "command": "polaroica.refresh",
         "title": "Refresh",
-        "category": "Photo Library",
+        "category": "Polaroica",
         "icon": "$(refresh)"
       },
       {
-        "command": "vsphoto.removeLibrary",
+        "command": "polaroica.removeLibrary",
         "title": "Remove Library",
-        "category": "Photo Library",
+        "category": "Polaroica",
         "icon": "$(close)"
       },
       {
-        "command": "vsphoto.openFolder",
+        "command": "polaroica.openFolder",
         "title": "Open Photos",
-        "category": "Photo Library",
+        "category": "Polaroica",
         "icon": "$(file-media)"
       },
       {
-        "command": "vsphoto.moveTo",
+        "command": "polaroica.moveTo",
         "title": "Move to…",
-        "category": "Photo Library",
+        "category": "Polaroica",
         "icon": "$(move)"
       },
       {
-        "command": "vsphoto.newFolder",
+        "command": "polaroica.newFolder",
         "title": "New Folder…",
-        "category": "Photo Library",
+        "category": "Polaroica",
         "icon": "$(new-folder)"
       },
       {
-        "command": "vsphoto.revealInOS",
+        "command": "polaroica.revealInOS",
         "title": "Reveal in OS",
-        "category": "Photo Library",
+        "category": "Polaroica",
         "icon": "$(folder-opened)"
       },
       {
-        "command": "vsphoto.cacheInfo",
+        "command": "polaroica.cacheInfo",
         "title": "Show Cache Info",
-        "category": "Photo Library",
+        "category": "Polaroica",
         "icon": "$(info)"
       },
       {
-        "command": "vsphoto.buildThumbnails",
+        "command": "polaroica.buildThumbnails",
         "title": "Build All Thumbnails",
-        "category": "Photo Library",
+        "category": "Polaroica",
         "icon": "$(run-all)"
       },
       {
-        "command": "vsphoto.thumbnailProgress",
+        "command": "polaroica.thumbnailProgress",
         "title": "Thumbnail Progress…",
-        "category": "Photo Library",
+        "category": "Polaroica",
         "icon": "$(pulse)"
       },
       {
-        "command": "vsphoto.photoMoveTo",
+        "command": "polaroica.photoMoveTo",
         "title": "Move to…",
-        "category": "Photo Library",
+        "category": "Polaroica",
         "icon": "$(move)"
       },
       {
-        "command": "vsphoto.photoReveal",
+        "command": "polaroica.photoReveal",
         "title": "Reveal in OS",
-        "category": "Photo Library",
+        "category": "Polaroica",
         "icon": "$(folder-opened)"
       },
       {
-        "command": "vsphoto.photoExport",
+        "command": "polaroica.photoExport",
         "title": "Export to JPEG…",
-        "category": "Photo Library",
+        "category": "Polaroica",
         "icon": "$(export)"
       },
       {
-        "command": "vsphoto.autoRank",
+        "command": "polaroica.autoRank",
         "title": "Auto-Rank Album…",
-        "category": "Photo Library",
+        "category": "Polaroica",
         "icon": "$(sparkle)"
       },
       {
-        "command": "vsphoto.undoAutoRank",
+        "command": "polaroica.undoAutoRank",
         "title": "Undo Auto-Rank",
-        "category": "Photo Library",
+        "category": "Polaroica",
         "icon": "$(discard)",
-        "enablement": "vsphoto.canUndoAutoRank"
+        "enablement": "polaroica.canUndoAutoRank"
       },
       {
-        "command": "vsphoto.exportPhotos",
+        "command": "polaroica.exportPhotos",
         "title": "Export to JPEG…",
-        "category": "Photo Library",
+        "category": "Polaroica",
         "icon": "$(export)"
       },
       {
-        "command": "vsphoto.deleteRejected",
+        "command": "polaroica.deleteRejected",
         "title": "Delete Rejected Photos…",
-        "category": "Photo Library",
+        "category": "Polaroica",
         "icon": "$(trash)"
       },
       {
-        "command": "vsphoto.showLog",
+        "command": "polaroica.showLog",
         "title": "Show Log",
-        "category": "Photo Library",
+        "category": "Polaroica",
         "icon": "$(output)"
       }
     ],
     "menus": {
       "view/title": [
         {
-          "command": "vsphoto.addLibrary",
-          "when": "view == vsphoto.libraries",
+          "command": "polaroica.addLibrary",
+          "when": "view == polaroica.libraries",
           "group": "navigation@1"
         },
         {
-          "command": "vsphoto.refresh",
-          "when": "view == vsphoto.libraries",
+          "command": "polaroica.refresh",
+          "when": "view == polaroica.libraries",
           "group": "navigation@2"
         }
       ],
       "view/item/context": [
         {
-          "command": "vsphoto.openFolder",
-          "when": "view == vsphoto.libraries && viewItem =~ /^(library|folder)$/",
+          "command": "polaroica.openFolder",
+          "when": "view == polaroica.libraries && viewItem =~ /^(library|folder)$/",
           "group": "1_open@1"
         },
         {
-          "command": "vsphoto.autoRank",
-          "when": "view == vsphoto.libraries && viewItem =~ /^(library|folder)$/",
+          "command": "polaroica.autoRank",
+          "when": "view == polaroica.libraries && viewItem =~ /^(library|folder)$/",
           "group": "1_open@2"
         },
         {
-          "command": "vsphoto.undoAutoRank",
-          "when": "view == vsphoto.libraries && viewItem =~ /^(library|folder)$/ && vsphoto.canUndoAutoRank",
+          "command": "polaroica.undoAutoRank",
+          "when": "view == polaroica.libraries && viewItem =~ /^(library|folder)$/ && polaroica.canUndoAutoRank",
           "group": "1_open@3"
         },
         {
-          "command": "vsphoto.newFolder",
-          "when": "view == vsphoto.libraries && viewItem =~ /^(library|folder)$/",
+          "command": "polaroica.newFolder",
+          "when": "view == polaroica.libraries && viewItem =~ /^(library|folder)$/",
           "group": "2_edit@1"
         },
         {
-          "command": "vsphoto.moveTo",
-          "when": "view == vsphoto.libraries && viewItem == folder",
+          "command": "polaroica.moveTo",
+          "when": "view == polaroica.libraries && viewItem == folder",
           "group": "2_edit@2"
         },
         {
-          "command": "vsphoto.exportPhotos",
-          "when": "view == vsphoto.libraries && viewItem =~ /^(library|folder)$/",
+          "command": "polaroica.exportPhotos",
+          "when": "view == polaroica.libraries && viewItem =~ /^(library|folder)$/",
           "group": "2_edit@3"
         },
         {
-          "command": "vsphoto.deleteRejected",
-          "when": "view == vsphoto.libraries && viewItem =~ /^(library|folder)$/",
+          "command": "polaroica.deleteRejected",
+          "when": "view == polaroica.libraries && viewItem =~ /^(library|folder)$/",
           "group": "2_edit@4"
         },
         {
-          "command": "vsphoto.revealInOS",
-          "when": "view == vsphoto.libraries && viewItem =~ /^(library|folder)$/",
+          "command": "polaroica.revealInOS",
+          "when": "view == polaroica.libraries && viewItem =~ /^(library|folder)$/",
           "group": "3_reveal@1"
         },
         {
-          "command": "vsphoto.removeLibrary",
-          "when": "view == vsphoto.libraries && viewItem =~ /^library/",
+          "command": "polaroica.removeLibrary",
+          "when": "view == polaroica.libraries && viewItem =~ /^library/",
           "group": "9_library@1"
         }
       ],
       "commandPalette": [
         {
-          "command": "vsphoto.removeLibrary",
+          "command": "polaroica.removeLibrary",
           "when": "false"
         },
         {
-          "command": "vsphoto.openFolder",
+          "command": "polaroica.openFolder",
           "when": "false"
         },
         {
-          "command": "vsphoto.moveTo",
+          "command": "polaroica.moveTo",
           "when": "false"
         },
         {
-          "command": "vsphoto.newFolder",
+          "command": "polaroica.newFolder",
           "when": "false"
         },
         {
-          "command": "vsphoto.revealInOS",
+          "command": "polaroica.revealInOS",
           "when": "false"
         },
         {
-          "command": "vsphoto.photoMoveTo",
+          "command": "polaroica.photoMoveTo",
           "when": "false"
         },
         {
-          "command": "vsphoto.photoReveal",
+          "command": "polaroica.photoReveal",
           "when": "false"
         },
         {
-          "command": "vsphoto.photoExport",
+          "command": "polaroica.photoExport",
           "when": "false"
         }
       ],
       "webview/context": [
         {
-          "command": "vsphoto.photoMoveTo",
-          "when": "(webviewId == 'vsphoto.grid' || webviewId == 'vsphoto.photo') && webviewSection == 'photo'",
+          "command": "polaroica.photoMoveTo",
+          "when": "(webviewId == 'polaroica.grid' || webviewId == 'polaroica.photo') && webviewSection == 'photo'",
           "group": "1_photo@1"
         },
         {
-          "command": "vsphoto.photoReveal",
-          "when": "(webviewId == 'vsphoto.grid' || webviewId == 'vsphoto.photo') && webviewSection == 'photo'",
+          "command": "polaroica.photoReveal",
+          "when": "(webviewId == 'polaroica.grid' || webviewId == 'polaroica.photo') && webviewSection == 'photo'",
           "group": "1_photo@3"
         },
         {
-          "command": "vsphoto.photoExport",
-          "when": "(webviewId == 'vsphoto.grid' || webviewId == 'vsphoto.photo') && webviewSection == 'photo'",
+          "command": "polaroica.photoExport",
+          "when": "(webviewId == 'polaroica.grid' || webviewId == 'polaroica.photo') && webviewSection == 'photo'",
           "group": "1_photo@2"
         }
       ]
     },
     "configuration": {
-      "title": "Photo Library",
+      "title": "Polaroica",
       "properties": {
-        "vsphoto.sortBy": {
+        "polaroica.sortBy": {
           "type": "string",
           "enum": [
             "name",
@@ -298,12 +298,12 @@
           "default": "name",
           "description": "Default order of photos in the grid and in photo tabs."
         },
-        "vsphoto.showPhotoCounts": {
+        "polaroica.showPhotoCounts": {
           "type": "boolean",
           "default": true,
-          "description": "Show how many photos each folder holds in the Photo Libraries tree. Turn off for very slow shares."
+          "description": "Show how many photos each folder holds in the Libraries tree. Turn off for very slow shares."
         },
-        "vsphoto.thumbnailSize": {
+        "polaroica.thumbnailSize": {
           "type": "number",
           "enum": [
             192,
@@ -313,32 +313,32 @@
           "default": 256,
           "description": "Long edge of generated thumbnails in pixels. Bigger looks sharper at large grid sizes but uses more disk (about 4, 6 and 9 KB per photo). Changing it regenerates thumbnails."
         },
-        "vsphoto.cacheSizeMB": {
+        "polaroica.cacheSizeMB": {
           "type": "number",
           "default": 1024,
           "minimum": 50,
           "description": "Most disk space the local thumbnail cache may use, in MB. Least recently viewed folders are removed first. About 5 KB per photo at the default thumbnail size, so 1024 MB holds roughly 200,000 photos."
         },
-        "vsphoto.backgroundThumbnails": {
+        "polaroica.backgroundThumbnails": {
           "type": "boolean",
           "default": true,
           "description": "Build thumbnails for every photo in your libraries in the background: a quick pass from each photo's small EXIF preview, then sharp thumbnails from the camera's built-in preview (or the full file). Reads the share gently and waits while you browse."
         },
-        "vsphoto.autoRank.burstSeconds": {
+        "polaroica.autoRank.burstSeconds": {
           "type": "number",
           "default": 2,
           "minimum": 0.2,
           "maximum": 30,
           "description": "Auto-Rank: photos taken at most this many seconds apart that look alike are one burst of similar shots."
         },
-        "vsphoto.autoRank.sceneSeconds": {
+        "polaroica.autoRank.sceneSeconds": {
           "type": "number",
           "default": 60,
           "minimum": 0,
           "maximum": 600,
           "description": "Auto-Rank: photos taken up to this many seconds apart also stack together when they show the same scene and framing (same colours in the same places) — the same pose shot again after a short pause. 0 turns this off."
         },
-        "vsphoto.export.quality": {
+        "polaroica.export.quality": {
           "type": "number",
           "default": 90,
           "minimum": 50,

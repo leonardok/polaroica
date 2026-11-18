@@ -106,7 +106,7 @@ export function buildExif(info: ExifInfo | undefined, width: number, height: num
     res(0x011a),
     res(0x011b),
     { tag: 0x0128, type: 3, value: 2 },
-    { tag: 0x0131, type: 2, value: 'Photo Library for VS Code' },
+    { tag: 0x0131, type: 2, value: 'Polaroica for VS Code' },
     { tag: 0x8769, type: 4, value: 0 }, // Exif IFD, filled below
   ];
   if (i.make) ifd0.push({ tag: 0x010f, type: 2, value: i.make });
