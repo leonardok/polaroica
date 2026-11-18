@@ -2,7 +2,7 @@
  * Auto-Rank: turns per-photo measurements into star ratings, picks, groups of similar shots and
  * a short explanation. Pure logic, no I/O. No `vscode` import.
  */
-import { Analysis, hamming } from './analyze';
+import { Analysis, hamming, layoutDistance } from './analyze';
 import { compareNames } from './images';
 
 /** One face found by the face model, scored 0–100 (higher is better). */
@@ -33,6 +33,8 @@ export interface RankOptions {
   reject: boolean;
   /** Max seconds between frames of one burst. */
   burstSeconds: number;
+  /** Max seconds between shots of one scene (same framing, people moved): default 60. */
+  sceneSeconds?: number;
   /** Face expression signals to use (needs `faces` on the inputs). */
   people?: PeopleSignal[];
 }
@@ -69,11 +71,30 @@ export interface RankResult {
   reason: string;
 }
 
-/** Bits (of 64) two shots may differ by and still count as the same scene. */
-const SIMILAR_BITS = 14;
+/** Bits (of 64) two frames of one burst may differ by. */
+const BURST_BITS = 14;
+/** Shots further apart in time: the hash may differ more if the colour layout matches too. */
+const SCENE_BITS = 20;
+const SCENE_COLOUR = 45;
 
-/** Groups consecutive photos taken close together that look alike. */
-export function groupSimilar(items: RankInput[], burstSeconds: number): RankInput[][] {
+/** Same scene: alike enough for how far apart in time they were taken. */
+function alike(a: RankInput, b: RankInput, burst: boolean): boolean {
+  const bits = hamming(a.hash, b.hash);
+  if (burst && bits <= BURST_BITS) {
+    return true;
+  }
+  const colour = layoutDistance(a.layout, b.layout);
+  return colour !== undefined && bits <= SCENE_BITS && colour <= SCENE_COLOUR;
+}
+
+/**
+ * Groups photos of one moment. In time order, a photo joins the current group when it was taken
+ * soon after the group's last photo and looks like any photo already in it: within a burst
+ * (`burstSeconds`) the look-alike hash decides; up to `sceneSeconds` apart (the same pose shot
+ * again a few seconds later) the colour layout must match as well, so a reframe or zoom starts a
+ * new group.
+ */
+export function groupSimilar(items: RankInput[], burstSeconds: number, sceneSeconds = 60): RankInput[][] {
   const sorted = [...items].sort((a, b) => {
     if (a.time !== undefined && b.time !== undefined && a.time !== b.time) {
       return a.time - b.time;
@@ -84,12 +105,15 @@ export function groupSimilar(items: RankInput[], burstSeconds: number): RankInpu
   let cur: RankInput[] = [];
   for (const p of sorted) {
     const prev = cur[cur.length - 1];
-    const closeInTime =
-      prev &&
-      (prev.time !== undefined && p.time !== undefined
-        ? Math.abs(p.time - prev.time) <= burstSeconds * 1000
-        : neighbourNumbers(prev.name, p.name));
-    if (prev && closeInTime && hamming(prev.hash, p.hash) <= SIMILAR_BITS) {
+    let fits = false;
+    if (prev) {
+      const timed = prev.time !== undefined && p.time !== undefined;
+      const gap = timed ? Math.abs(p.time! - prev.time!) : undefined;
+      const burst = timed ? gap! <= burstSeconds * 1000 : neighbourNumbers(prev.name, p.name, 2);
+      const scene = timed ? gap! <= Math.max(sceneSeconds, burstSeconds) * 1000 : neighbourNumbers(prev.name, p.name, 6);
+      fits = (burst || scene) && cur.some((q) => alike(q, p, burst));
+    }
+    if (fits) {
       cur.push(p);
     } else {
       if (cur.length) groups.push(cur);
@@ -100,11 +124,11 @@ export function groupSimilar(items: RankInput[], burstSeconds: number): RankInpu
   return groups;
 }
 
-/** Without capture times: consecutive file numbers (_A733521, _A733522) suggest a burst. */
-function neighbourNumbers(a: string, b: string): boolean {
+/** Without capture times: close file numbers (_A733521, _A733522) suggest shots taken together. */
+function neighbourNumbers(a: string, b: string, within: number): boolean {
   const na = /(\d+)(?!.*\d)/.exec(a);
   const nb = /(\d+)(?!.*\d)/.exec(b);
-  return !!na && !!nb && Math.abs(Number(nb[1]) - Number(na[1])) <= 2;
+  return !!na && !!nb && Math.abs(Number(nb[1]) - Number(na[1])) <= within;
 }
 
 const clamp = (v: number) => Math.max(0, Math.min(100, v));
@@ -150,7 +174,7 @@ export function rankAlbum(items: RankInput[], opts: RankOptions): RankResult[] {
   };
   const starsFor = (q: number) => (q >= 80 ? 5 : q >= 65 ? 4 : q >= 45 ? 3 : q >= 25 ? 2 : 1);
 
-  const groups = opts.similar ? groupSimilar(items, opts.burstSeconds) : items.map((p) => [p]);
+  const groups = opts.similar ? groupSimilar(items, opts.burstSeconds, opts.sceneSeconds) : items.map((p) => [p]);
   const out: RankResult[] = [];
   let gid = 0;
   for (const g of groups) {

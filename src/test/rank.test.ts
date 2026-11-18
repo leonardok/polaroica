@@ -102,3 +102,46 @@ test('faces: in a burst the frame where nobody blinked and people smile at the c
   // A tiny face in the background is ignored.
   assert.equal(peopleScores([{ area: 0.0005, eyes: 0, looking: 0, smile: 0, natural: 0 }], ['eyes']), undefined);
 });
+
+/** A 16-hex hash with the first `flip` bits flipped (so `hamming` to hash(0) is `flip`). */
+function hashWith(flip: number): string {
+  let bitsLeft = flip;
+  let hex = '';
+  for (let i = 0; i < 8; i++) {
+    const n = Math.max(0, Math.min(8, bitsLeft));
+    bitsLeft -= n;
+    hex += ((0xff << (8 - n)) & 0xff).toString(16).padStart(2, '0');
+  }
+  return hex;
+}
+
+/** A colour layout (12×8 cells) of one flat colour. */
+function layoutOf(r: number, g: number, b: number): string {
+  const cell = [r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('');
+  return cell.repeat(96);
+}
+
+test('scenes: the same pose shot again within a minute stacks; a reframe or a burst of another scene does not', () => {
+  const t0 = Date.UTC(2023, 11, 24, 22, 0, 0);
+  const warm = layoutOf(200, 150, 100);
+  const warmish = layoutOf(215, 160, 110); // same scene, people moved: ~20 apart
+  const other = layoutOf(120, 120, 160); // reframed / another scene
+  const p = (name: string, s: number, flip: number, layout: string): RankInput => ({ name, time: t0 + s * 1000, sharpness: 10, blown: 0, hash: hashWith(flip), layout });
+  assert.equal(hamming(hashWith(0), hashWith(18)), 18);
+
+  const items = [
+    p('_A732858.jpg', 0, 0, warm),
+    p('_A732859.jpg', 1, 3, warm), // burst
+    p('_A732861.jpg', 9, 18, warmish), // 8 s later, hash 18 away, same colours: same scene
+    p('_A732863.jpg', 25, 16, warmish), // 16 s later
+    p('_A732870.jpg', 40, 19, other), // 15 s later, hash close-ish but different colours: reframed
+    p('_A732871.jpg', 41, 19, other), // its burst
+    p('_A732880.jpg', 200, 0, warm), // same look, but minutes later: a new moment
+  ];
+  const groups = groupSimilar(items, 2, 60).map((g) => g.map((x) => x.name.slice(5, 8)));
+  assert.deepEqual(groups, [['858', '859', '861', '863'], ['870', '871'], ['880']]);
+
+  // Scene window off: only bursts stack.
+  const strict = groupSimilar(items, 2, 0).map((g) => g.map((x) => x.name.slice(5, 8)));
+  assert.deepEqual(strict, [['858', '859'], ['861'], ['863'], ['870', '871'], ['880']]);
+});

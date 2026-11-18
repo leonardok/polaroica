@@ -72,6 +72,7 @@ export class AutoRanker {
       similar: choices.has('similar'),
       reject: choices.has('reject'),
       burstSeconds: vscode.workspace.getConfiguration('vsphoto').get<number>('autoRank.burstSeconds', 2),
+      sceneSeconds: vscode.workspace.getConfiguration('vsphoto').get<number>('autoRank.sceneSeconds', 60),
       people: PEOPLE.filter((k) => choices.has(k)),
     };
     let model: FaceModels | undefined;
@@ -141,23 +142,25 @@ export class AutoRanker {
           }
           const prev = stored.get(p.name);
           const fresh = prev && prev.size === p.size && prev.mtime === p.mtime;
-          if (!fresh || (model && prev.facesV !== FACES_V)) {
-            if (model) await room();
-            const a = await this.analyze(p, model ? FACE_PX : 0).catch((err) => {
+          const keepFaces = !!fresh && prev.facesV === FACES_V;
+          const needFaces = !!model && !keepFaces;
+          // Measured before the colour layout existed: measure again (faces are kept).
+          if (!fresh || !prev.layout || needFaces) {
+            if (needFaces) await room();
+            const a = await this.analyze(p, needFaces ? FACE_PX : 0).catch((err) => {
               this.log(`Auto-Rank: could not read ${p.name}: ${err instanceof Error ? err.message : String(err)}`);
               return undefined;
             });
             if (a) {
               const { pixels, ...m } = a;
-              const keep = fresh && prev.facesV === FACES_V;
-              const base: Stored = { ...m, faces: keep ? prev.faces : undefined, facesV: keep ? FACES_V : undefined, size: p.size, mtime: p.mtime };
+              const base: Stored = { ...m, faces: keepFaces ? prev!.faces : undefined, facesV: keepFaces ? FACES_V : undefined, size: p.size, mtime: p.mtime };
               stored.set(p.name, base);
-              if (model && pixels) {
+              if (needFaces && pixels) {
                 faceJobs.push(measureFaces(p, pixels, base));
                 return; // counted when its faces are done
               }
             }
-            if (model) leave();
+            if (needFaces) leave();
           }
           finish();
         });
@@ -183,7 +186,7 @@ export class AutoRanker {
       .filter((p) => stored.has(p.name))
       .map((p) => {
         const s = stored.get(p.name)!;
-        return { name: p.name, time: s.time, sharpness: s.sharpness, blown: s.blown, hash: s.hash, faces: s.faces };
+        return { name: p.name, time: s.time, sharpness: s.sharpness, blown: s.blown, hash: s.hash, layout: s.layout, faces: s.faces };
       });
     const results = rankAlbum(inputs, opts);
 
@@ -323,7 +326,7 @@ export class AutoRanker {
       if (!bytes || bytes.length !== r.length || !isBrowserJpeg(bytes)) continue;
       const a = await analyzeJpeg(bytes, opts).catch(() => undefined);
       if (a && Math.max(a.sourceWidth, a.sourceHeight) >= 900) {
-        return { sharpness: a.sharpness, blown: a.blown, hash: a.hash, time, pixels: a.pixels };
+        return { sharpness: a.sharpness, blown: a.blown, hash: a.hash, layout: a.layout, time, pixels: a.pixels };
       }
     }
     const ext = extensionOf(p.name);
@@ -335,7 +338,7 @@ export class AutoRanker {
       return undefined;
     }
     const a = await analyzeJpeg(full, opts);
-    return { sharpness: a.sharpness, blown: a.blown, hash: a.hash, time, pixels: a.pixels };
+    return { sharpness: a.sharpness, blown: a.blown, hash: a.hash, layout: a.layout, time, pixels: a.pixels };
   }
 
   private async pickChoices(album: string, count: number): Promise<Set<Choice> | undefined> {

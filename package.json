@@ -2,7 +2,7 @@
   "name": "vsphoto",
   "displayName": "Photo Library",
   "description": "Browse and organize photo libraries — local folders and SMB network shares — inside VS Code.",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "publisher": "leonardok",
   "license": "GPL-3.0-or-later",
   "repository": {
@@ -276,7 +276,14 @@
           "default": 2,
           "minimum": 0.2,
           "maximum": 30,
-          "description": "Auto-Rank: photos taken at most this many seconds apart (and looking alike) count as one burst of similar shots."
+          "description": "Auto-Rank: photos taken at most this many seconds apart that look alike are one burst of similar shots."
+        },
+        "vsphoto.autoRank.sceneSeconds": {
+          "type": "number",
+          "default": 60,
+          "minimum": 0,
+          "maximum": 600,
+          "description": "Auto-Rank: photos taken up to this many seconds apart also stack together when they show the same scene and framing (same colours in the same places) — the same pose shot again after a short pause. 0 turns this off."
         }
       }
     }

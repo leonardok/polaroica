@@ -30,7 +30,8 @@ can already reach.
 - **Auto-Rank** an album (right-click it in the sidebar, the grid's **Auto-Rank…** button, or the
   Command Palette): measures **focus** (sharpest part of each photo, relative to the album),
   **washed-out highlights** (large blown-out areas) and **similar shots** (bursts: taken within
-  `vsphoto.autoRank.burstSeconds` and alike by a look-alike hash), then sets stars, **picks the
+  `vsphoto.autoRank.burstSeconds` and alike by a look-alike hash; and the same pose shot again
+  within `vsphoto.autoRank.sceneSeconds` (60 s) when the framing and colours match too), then sets stars, **picks the
   best of each group of similar shots**, and stacks the groups in the grid. Photos you rated yourself
   are left alone; nothing is rejected unless you ask. Ratings it set carry a ✦ until you change them.
   The **AUTO-RANK** section (grid and photo tab) explains each rank with a radar chart and lets you
@@ -120,6 +121,7 @@ display as a labelled placeholder for now.
 | `vsphoto.cacheSizeMB` | `1024` | Disk space for the local cache. |
 | `vsphoto.backgroundThumbnails` | `true` | Build thumbnails for the whole library in the background. |
 | `vsphoto.autoRank.burstSeconds` | `2` | Auto-Rank: max seconds between frames of one burst. |
+| `vsphoto.autoRank.sceneSeconds` | `60` | Auto-Rank: max seconds between shots of the same scene and framing that still stack (0 = bursts only). |
 
 ## Develop
 

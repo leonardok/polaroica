@@ -11,6 +11,57 @@ export interface Analysis {
   blown: number;
   /** 64-bit difference hash (16 hex chars): near-identical photos differ in few bits. */
   hash: string;
+  /**
+   * Colour layout: the average colour of each cell of a 12×8 grid (288 bytes, hex). Shots of the
+   * same scene and framing match even when people moved; a reframe or another scene doesn't.
+   */
+  layout?: string;
+}
+
+const LAYOUT_W = 12;
+const LAYOUT_H = 8;
+
+function colourLayout(img: Rgba): string {
+  const { data, width, height } = img;
+  const sum = new Float64Array(LAYOUT_W * LAYOUT_H * 3);
+  const n = new Float64Array(LAYOUT_W * LAYOUT_H);
+  for (let y = 0; y < height; y++) {
+    const row = Math.min(LAYOUT_H - 1, Math.floor((y * LAYOUT_H) / height)) * LAYOUT_W;
+    for (let x = 0; x < width; x++) {
+      const c = row + Math.min(LAYOUT_W - 1, Math.floor((x * LAYOUT_W) / width));
+      const i = (y * width + x) * 4;
+      sum[c * 3] += data[i];
+      sum[c * 3 + 1] += data[i + 1];
+      sum[c * 3 + 2] += data[i + 2];
+      n[c]++;
+    }
+  }
+  let hex = '';
+  for (let c = 0; c < n.length; c++) {
+    for (let k = 0; k < 3; k++) {
+      hex += Math.round(sum[c * 3 + k] / (n[c] || 1)).toString(16).padStart(2, '0');
+    }
+  }
+  return hex;
+}
+
+/** Mean colour difference (0–441) between two layouts, per grid cell; undefined if one is missing. */
+export function layoutDistance(a: string | undefined, b: string | undefined): number | undefined {
+  if (!a || !b || a.length !== b.length) {
+    return undefined;
+  }
+  let total = 0;
+  const cells = a.length / 6;
+  for (let c = 0; c < cells; c++) {
+    let d = 0;
+    for (let k = 0; k < 3; k++) {
+      const o = c * 6 + k * 2;
+      const diff = parseInt(a.substr(o, 2), 16) - parseInt(b.substr(o, 2), 16);
+      d += diff * diff;
+    }
+    total += Math.sqrt(d);
+  }
+  return total / cells;
 }
 
 function gray(img: Rgba): Float32Array {
@@ -154,5 +205,6 @@ export function analyzePixels(img: Rgba): Analysis {
     sharpness: sharpness(g, img.width, img.height),
     blown: blownArea(g, img.width, img.height),
     hash: dhash(g, img.width, img.height),
+    layout: colourLayout(img),
   };
 }
