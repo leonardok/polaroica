@@ -5,6 +5,8 @@
 // open the eyes are, whether the person faces the camera, smiles, or was caught mid-word.
 (function () {
   let models; // Promise<{ detector: FaceDetector, landmarker: FaceLandmarker }>
+  /** Model files as bytes, sent once by the extension (kept so a failed load can be retried). */
+  let modelBytes;
 
   function load(rt) {
     if (!models) {
@@ -21,15 +23,16 @@
           });
         }
         const { FilesetResolver, FaceLandmarker, FaceDetector } = window.Vision;
+        if (!modelBytes) throw new Error('the face models were not received');
         const fileset = await FilesetResolver.forVisionTasks(rt.wasm);
         // CPU: predictable in every editor (the GPU path can stall in a webview).
         const detector = await FaceDetector.createFromOptions(fileset, {
-          baseOptions: { modelAssetPath: rt.detector, delegate: 'CPU' },
+          baseOptions: { modelAssetBuffer: modelBytes.detector, delegate: 'CPU' },
           runningMode: 'IMAGE',
           minDetectionConfidence: 0.5,
         });
         const landmarker = await FaceLandmarker.createFromOptions(fileset, {
-          baseOptions: { modelAssetPath: rt.model, delegate: 'CPU' },
+          baseOptions: { modelAssetBuffer: modelBytes.landmarker, delegate: 'CPU' },
           runningMode: 'IMAGE',
           numFaces: 1,
           outputFaceBlendshapes: true,
@@ -119,7 +122,8 @@
   // One photo at a time: the model isn't re-entrant and this keeps memory flat.
   let queue = Promise.resolve();
   window.vsphoto.faces = {
-    detect: (data, width, height, rt) => {
+    detect: (data, width, height, rt, bytes) => {
+      if (bytes) modelBytes = { landmarker: window.vsphoto.bytes(bytes.landmarker), detector: window.vsphoto.bytes(bytes.detector) };
       const run = queue.then(() => detect(data, width, height, rt));
       queue = run.catch(() => undefined);
       return run;

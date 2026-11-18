@@ -9,7 +9,8 @@ import { Thumb } from './core/cache';
 import { ThumbJob, ThumbService } from './thumbs';
 import { EditStore } from './edits';
 import { fromWire, localRoots, post, webviewHtml } from './webview';
-import { FaceModels, modelsDir } from './faceModel';
+import * as fs from 'fs';
+import { FaceModels } from './faceModel';
 import { FaceMetric } from './core/rank';
 import { Rgba } from './core/image';
 
@@ -77,7 +78,7 @@ export class GridPanels implements vscode.Disposable {
         : []),
       vscode.workspace.onDidChangeWorkspaceFolders(() => {
         for (const p of this.panels.values()) {
-          p.panel.webview.options = { ...p.panel.webview.options, localResourceRoots: localRoots(context.extensionUri, [modelsDir(context)]) };
+          p.panel.webview.options = { ...p.panel.webview.options, localResourceRoots: localRoots(context.extensionUri) };
         }
       }),
     );
@@ -97,7 +98,7 @@ export class GridPanels implements vscode.Disposable {
       'vsphoto.grid',
       path.basename(folder.fsPath) || folder.fsPath,
       { viewColumn: vscode.ViewColumn.Active, preserveFocus: false },
-      { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: localRoots(this.context.extensionUri, [modelsDir(this.context)]) },
+      { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: localRoots(this.context.extensionUri) },
     );
     panel.iconPath = {
       light: vscode.Uri.joinPath(this.context.extensionUri, 'media', 'grid-light.svg'),
@@ -208,6 +209,8 @@ class GridPanel {
   private nextId = 1;
   private readonly pending = new Map<number, (t: Thumb | undefined) => void>();
   private readonly pendingFaces = new Map<number, (r: { faces?: FaceMetric[]; error?: string }) => void>();
+  /** The face models were handed to the page (sent once, as bytes: see detectFaces). */
+  private modelsSent = false;
   private markReady!: () => void;
   /** Resolves once the page's script listens for messages. */
   private readonly ready = new Promise<void>((r) => (this.markReady = r));
@@ -250,6 +253,18 @@ class GridPanel {
   /** Runs the face model on a photo in this tab (MediaPipe needs a browser page). */
   async detectFaces(pixels: Rgba, models: FaceModels): Promise<{ faces?: FaceMetric[]; error?: string }> {
     await this.ready;
+    // The models go to the page as bytes. Letting the page fetch them from the extension's
+    // storage folder is refused by some VS Code builds (401) even when that folder is allowed.
+    let modelBytes: { landmarker: Uint8Array; detector: Uint8Array } | undefined;
+    if (!this.modelsSent) {
+      try {
+        const [landmarker, detector] = await Promise.all([fs.promises.readFile(models.landmarker), fs.promises.readFile(models.detector)]);
+        modelBytes = { landmarker, detector };
+        this.modelsSent = true;
+      } catch (err) {
+        return { error: `could not read the face models: ${err instanceof Error ? err.message : String(err)}` };
+      }
+    }
     const w = this.panel.webview;
     const ext = this.owner.ctx.context.extensionUri;
     const mp = vscode.Uri.joinPath(ext, 'node_modules', '@mediapipe', 'tasks-vision');
@@ -272,9 +287,8 @@ class GridPanel {
         runtime: {
           bundle: w.asWebviewUri(vscode.Uri.joinPath(mp, 'vision_bundle.js')).toString(),
           wasm: w.asWebviewUri(vscode.Uri.joinPath(mp, 'wasm')).toString(),
-          model: w.asWebviewUri(vscode.Uri.file(models.landmarker)).toString(),
-          detector: w.asWebviewUri(vscode.Uri.file(models.detector)).toString(),
         },
+        models: modelBytes,
       });
     });
   }

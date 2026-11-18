@@ -597,7 +597,7 @@
       }
       case 'faces':
         window.vsphoto.faces
-          .detect(window.vsphoto.bytes(m.data), m.width, m.height, m.runtime)
+          .detect(window.vsphoto.bytes(m.data), m.width, m.height, m.runtime, m.models)
           .then((faces) => post({ type: 'facesResult', id: m.id, faces }))
           .catch((err) => post({ type: 'facesResult', id: m.id, error: String((err && err.message) || err) }));
         break;
