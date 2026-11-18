@@ -560,7 +560,7 @@
   function autoRankSection(name, auto) {
     const g = auto.group;
     const members = g && g.size > 1 ? photos.filter((p) => p.cull && p.cull.auto && p.cull.auto.group && p.cull.auto.group.id === g.id) : [];
-    const summary = h('span', { class: 'section-summary' }, SPARK(), g && g.size > 1 ? (g.best ? ` best of ${g.size}` : ` 1 of ${g.size} similar`) : ' ranked');
+    const summary = h('span', { class: 'section-summary' }, SPARK(), g && g.size > 1 ? (g.best ? ` best of ${g.size}` : g.kept ? ` kept · 1 of ${g.size} similar` : ` 1 of ${g.size} similar`) : ' ranked');
     return section(
       'autorank',
       h('span', { class: 'section-title' }, 'AUTO-RANK', summary),

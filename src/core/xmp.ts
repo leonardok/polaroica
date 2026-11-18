@@ -125,7 +125,7 @@ export type Flag = 'pick' | 'reject';
 export interface AutoRank {
   scores: Record<string, number>; // e.g. { focus: 86, exposure: 96, similar: 100 }
   groupAvg?: Record<string, number>; // same keys: average of its similar shots
-  group?: { id: string; size: number; best: boolean };
+  group?: { id: string; size: number; best: boolean; kept?: boolean };
   notes?: string[]; // "blurry", "washed out"
   reason?: string; // one line for people
   at: string; // ISO time of the run

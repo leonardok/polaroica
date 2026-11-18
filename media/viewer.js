@@ -131,7 +131,7 @@
       }
     });
     const autoSection = cull && cull.auto
-      ? section('autorank', h('span', { class: 'section-title' }, 'AUTO-RANK', h('span', { class: 'section-summary' }, icon('spark', 10), cull.auto.group && cull.auto.group.size > 1 ? (cull.auto.group.best ? ` best of ${cull.auto.group.size}` : ` 1 of ${cull.auto.group.size} similar`) : ' ranked')), rankExplanation(cull.auto))
+      ? section('autorank', h('span', { class: 'section-title' }, 'AUTO-RANK', h('span', { class: 'section-summary' }, icon('spark', 10), cull.auto.group && cull.auto.group.size > 1 ? (cull.auto.group.best ? ` best of ${cull.auto.group.size}` : cull.auto.group.kept ? ` kept · 1 of ${cull.auto.group.size} similar` : ` 1 of ${cull.auto.group.size} similar`) : ' ranked')), rankExplanation(cull.auto))
       : null;
     const aside = h('aside', { class: 'details', 'aria-label': 'Photo panel' }, section('details', 'DETAILS', detailsBody), autoSection, adjustSection);
     rateBarEl = h('div', { class: 'ratebar' });

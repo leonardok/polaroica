@@ -341,14 +341,17 @@ export class AutoRanker {
         continue;
       }
       const isBest = n === name;
-      sc.auto = { ...sc.auto, group: { ...sc.auto.group, best: isBest } };
+      // The old best was as good as anything here: it stays kept (unflagged, same stars).
+      const wasBest = !!c.auto?.group?.best && !isBest;
+      const { kept: _k, ...rest } = sc.auto.group;
+      sc.auto = { ...sc.auto, group: { ...rest, best: isBest, ...(wasBest || (!isBest && _k) ? { kept: true } : {}) } };
       if (isBest) {
         sc.flag = 'pick';
         sc.rating = Math.max(bestStars, c.rating);
         sc.auto.reason = `Best of ${g.size} similar shots: your choice.`;
       } else if (c.flag === 'pick') {
         sc.flag = undefined;
-        sc.rating = Math.max(1, Math.min(c.rating, bestStars - 1));
+        if (!wasBest) sc.rating = Math.max(1, Math.min(c.rating, bestStars - 1));
       }
       await this.edits.write(photo, sc);
     }

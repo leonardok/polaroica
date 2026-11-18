@@ -91,10 +91,16 @@ export interface RankResult {
   flag?: 'pick' | 'reject';
   scores: Record<string, number>;
   groupAvg?: Record<string, number>;
-  group?: { id: string; size: number; best: boolean };
+  /** `kept`: not the best, but as good (a near-tie): left unflagged, with full stars. */
+  group?: { id: string; size: number; best: boolean; kept?: boolean };
   notes: string[];
   reason: string;
 }
+
+/** A shot within this share of its group's best counts as just as good (a near-tie). */
+export const TIE_BAND = 0.95;
+/** Most shots one group keeps: the best plus near-ties, so a long burst still collapses. */
+export const MAX_KEEP = 3;
 
 /** Bits (of 64) two frames of one burst may differ by. */
 const BURST_BITS = 14;
@@ -227,39 +233,53 @@ export function rankAlbum(items: RankInput[], opts: RankOptions): RankResult[] {
       }
       if (opts.similar) avg.similar = Math.round(g.reduce((a, p) => a + (100 * quality(p.name)) / (bestQ || 1), 0) / g.length);
     }
+    const notesFor = (p: RankInput) => {
+      const s = base.get(p.name)!;
+      const notes: string[] = [];
+      if (opts.focus && Math.round(s.focus ?? 100) < 20) notes.push('blurry');
+      if (opts.exposure && Math.round(s.exposure ?? 100) < 60) notes.push('washed out');
+      if (faceCount.get(p.name) && s.eyes !== undefined && Math.round(s.eyes) < 40) notes.push('eyes closed');
+      return notes;
+    };
+    // Near-ties of the best are kept too (no reject, full stars), best first, up to MAX_KEEP in all.
+    const kept = new Set(
+      best
+        ? ranked
+            .filter((p) => p !== best && !p.rejected && quality(p.name) >= TIE_BAND * bestQ && !notesFor(p).length)
+            .slice(0, MAX_KEEP - 1)
+        : [],
+    );
     for (const p of g) {
       const q = quality(p.name);
       const scores = { ...base.get(p.name)! };
       if (opts.similar) scores.similar = g.length > 1 ? clamp((100 * q) / (bestQ || 1)) : 100;
       for (const k of Object.keys(scores)) scores[k] = Math.round(scores[k]);
       const isBest = p === best;
-      const notes: string[] = [];
-      if (opts.focus && (scores.focus ?? 100) < 20) notes.push('blurry');
-      if (opts.exposure && (scores.exposure ?? 100) < 60) notes.push('washed out');
-      if (faceCount.get(p.name) && scores.eyes !== undefined && scores.eyes < 40) notes.push('eyes closed');
+      const isKept = kept.has(p);
+      const notes = notesFor(p);
       let stars = starsFor(q);
-      if (g.length > 1 && !isBest) stars = Math.min(stars, Math.max(1, bestStars - 1));
+      if (g.length > 1 && !isBest && !isKept) stars = Math.min(stars, Math.max(1, bestStars - 1));
       if (notes.includes('blurry') || notes.includes('washed out')) stars = Math.min(stars, 2);
       else if (notes.includes('eyes closed')) stars = Math.min(stars, 3);
       let flag: 'pick' | 'reject' | undefined;
       if (g.length > 1 && isBest && !notes.length && !p.rejected) flag = 'pick';
-      if (opts.reject && (notes.length || (g.length > 1 && !isBest))) flag = 'reject';
+      if (opts.reject && (notes.length || (g.length > 1 && !isBest && !isKept))) flag = 'reject';
       out.push({
         name: p.name,
         stars,
         flag,
         scores,
         groupAvg: g.length > 1 ? avg : undefined,
-        group: g.length > 1 ? { id: `g${gid}`, size: g.length, best: isBest } : undefined,
+        group: g.length > 1 ? { id: `g${gid}`, size: g.length, best: isBest, ...(isKept ? { kept: true } : {}) } : undefined,
         notes,
-        reason: reasonFor(scores, notes, g.length, isBest, faceCount.get(p.name) ?? 0),
+        reason: reasonFor(scores, notes, g.length, isBest, faceCount.get(p.name) ?? 0, isKept),
       });
     }
   }
   return out;
 }
 
-function reasonFor(scores: Record<string, number>, notes: string[], size: number, best: boolean, faces: number): string {
+function reasonFor(scores: Record<string, number>, notes: string[], size: number, best: boolean, faces: number, kept = false): string {
   const bits: string[] = [];
   if (faces) {
     const who = faces === 1 ? 'the person' : faces === 2 ? 'both people' : `all ${faces} people`;
@@ -275,9 +295,9 @@ function reasonFor(scores: Record<string, number>, notes: string[], size: number
   else if (scores.exposure !== undefined && scores.exposure >= 95) bits.push('no blown highlights');
   const what = bits.length ? bits.join(', ') : 'average focus and exposure';
   if (size > 1) {
-    return best
-      ? `Best of ${size} similar shots: ${what}.`
-      : `One of ${size} similar shots; another one is better. This one: ${what}.`;
+    if (best) return `Best of ${size} similar shots: ${what}.`;
+    if (kept) return `One of ${size} similar shots, about as good as the best, so it's kept: ${what}.`;
+    return `One of ${size} similar shots; another one is better. This one: ${what}.`;
   }
   return what.charAt(0).toUpperCase() + what.slice(1) + '.';
 }

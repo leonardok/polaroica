@@ -161,6 +161,29 @@ test('rejects you keep are never the best of a group; the best kept shot is pick
   assert.ok(all.every((r) => !r.group?.best && r.flag !== 'pick'), 'all rejected: nothing picked');
 });
 
+test('near-ties of the best are kept: no reject, full stars; a long burst still keeps only three', () => {
+  const t0 = Date.UTC(2023, 11, 24, 23, 48, 0);
+  const p = (name: string, s: number, focus: number): RankInput => ({ name, time: t0 + s * 1000, sharpness: 1, blown: 0, hash: hashWith(0), frameFocus: focus });
+  const opts = { focus: true, exposure: true, similar: true, reject: true, burstSeconds: 2 };
+
+  // Two excellent shots a hair apart, one clearly weaker.
+  const res = rankAlbum([p('_A732889.jpg', 0, 97), p('_A732890.jpg', 1, 100), p('_A732891.jpg', 2, 70)], opts);
+  const by = (n: string) => res.find((r) => r.name === n)!;
+  assert.equal(by('_A732890.jpg').flag, 'pick');
+  assert.equal(by('_A732889.jpg').flag, undefined, 'a near-tie is not rejected');
+  assert.equal(by('_A732889.jpg').group?.kept, true);
+  assert.equal(by('_A732889.jpg').stars, by('_A732890.jpg').stars, 'and keeps its full stars');
+  assert.match(by('_A732889.jpg').reason, /about as good as the best/);
+  assert.equal(by('_A732891.jpg').flag, 'reject', 'clearly weaker shots are still rejected');
+  assert.equal(by('_A732891.jpg').group?.kept, undefined);
+
+  // Six equally good frames: the best plus two near-ties stay, the rest are rejected.
+  const burst = rankAlbum([0, 1, 2, 3, 4, 5].map((i) => p(`b${i}.jpg`, i * 0.3, 98)), opts);
+  assert.equal(burst.filter((r) => r.flag === 'pick').length, 1);
+  assert.equal(burst.filter((r) => r.group?.kept).length, 2);
+  assert.equal(burst.filter((r) => r.flag === 'reject').length, 3);
+});
+
 test('focus: measured on the subject, not the whole frame', () => {
   const face = (area: number, focus: number) => ({ area, eyes: 100, looking: 100, smile: 50, natural: 100, focus });
   const base = { name: 'x.jpg', sharpness: 1, blown: 0, hash: hashWith(0), frameFocus: 40 };
