@@ -11,4 +11,4 @@ node_modules/**/*.d.ts
 node_modules/**/*.md
 node_modules/@mediapipe/tasks-vision/wasm/vision_wasm_module_internal.*
 node_modules/@mediapipe/tasks-vision/vision_bundle.cjs
-node_modules/@mediapipe/tasks-vision/vision_bundle.js
+node_modules/@mediapipe/tasks-vision/vision_bundle.mjs

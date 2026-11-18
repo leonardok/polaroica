@@ -109,13 +109,27 @@ export async function makeThumbHere(jpeg: Uint8Array, opts: ThumbOptions): Promi
   return { data: Buffer.from(webp), w: img.width, h: img.height, sourceWidth, sourceHeight };
 }
 
+export interface AnalyzeOptions {
+  /** Also return the photo, upright, at this long edge (for the face model). */
+  facePx?: number;
+  orientation?: number;
+}
+
+export type Analyzed = Analysis & { sourceWidth: number; sourceHeight: number; pixels?: Rgba };
+
 /** Decodes a JPEG and measures it for Auto-Rank at ~1024 px. In this thread. */
-export async function analyzeHere(jpeg: Uint8Array): Promise<Analysis & { sourceWidth: number; sourceHeight: number }> {
+export async function analyzeHere(jpeg: Uint8Array, opts: AnalyzeOptions = {}): Promise<Analyzed> {
   const { decode } = await codecs();
   const ab = jpeg.buffer.slice(jpeg.byteOffset, jpeg.byteOffset + jpeg.byteLength) as ArrayBuffer;
   const img = await decode.default(ab, { preserveOrientation: false });
   const a = analyzePixels(downscale(img, 1024));
-  return { ...a, sourceWidth: img.width, sourceHeight: img.height };
+  let pixels: Rgba | undefined;
+  if (opts.facePx) {
+    const p = orient(downscale(img, opts.facePx), opts.orientation);
+    // Own copy: small, and transferable to another thread without dragging the full decode along.
+    pixels = { data: new Uint8Array(p.data), width: p.width, height: p.height };
+  }
+  return { ...a, sourceWidth: img.width, sourceHeight: img.height, pixels };
 }
 
 // ---- worker pool ------------------------------------------------------------------------
@@ -126,7 +140,7 @@ export async function analyzeHere(jpeg: Uint8Array): Promise<Analysis & { source
  */
 class Pool {
   private readonly workers: Array<{ w: Worker; busy: boolean }> = [];
-  private readonly queue: Array<{ kind: 'thumb' | 'analyze'; jpeg: Uint8Array; opts?: ThumbOptions; resolve: (t: any) => void; reject: (e: unknown) => void }> = [];
+  private readonly queue: Array<{ kind: 'thumb' | 'analyze'; jpeg: Uint8Array; opts?: ThumbOptions | AnalyzeOptions; resolve: (t: any) => void; reject: (e: unknown) => void }> = [];
   private readonly pending = new Map<number, { kind: 'thumb' | 'analyze'; resolve: (t: any) => void; reject: (e: unknown) => void; worker: { w: Worker; busy: boolean } }>();
   private nextId = 1;
 
@@ -183,9 +197,9 @@ class Pool {
     });
   }
 
-  analyze(jpeg: Uint8Array): Promise<Analysis & { sourceWidth: number; sourceHeight: number }> {
+  analyze(jpeg: Uint8Array, opts: AnalyzeOptions): Promise<Analyzed> {
     return new Promise((resolve, reject) => {
-      this.queue.push({ kind: 'analyze', jpeg, resolve, reject });
+      this.queue.push({ kind: 'analyze', jpeg, opts, resolve, reject });
       this.drain();
     });
   }
@@ -250,7 +264,7 @@ export async function makeThumb(jpeg: Uint8Array, opts: ThumbOptions): Promise<M
 }
 
 /** Auto-Rank measurements of a JPEG, on a worker thread when possible. */
-export async function analyzeJpeg(jpeg: Uint8Array): Promise<Analysis & { sourceWidth: number; sourceHeight: number }> {
+export async function analyzeJpeg(jpeg: Uint8Array, opts: AnalyzeOptions = {}): Promise<Analyzed> {
   if (!pool && !poolFailed && fs.existsSync(path.join(__dirname, 'codecWorker.js'))) {
     try {
       pool = new Pool(codecThreads());
@@ -260,14 +274,14 @@ export async function analyzeJpeg(jpeg: Uint8Array): Promise<Analysis & { source
   }
   if (pool) {
     try {
-      return await pool.analyze(jpeg);
+      return await pool.analyze(jpeg, opts);
     } catch (err) {
       if (/decod/i.test(String(err))) {
         throw err;
       }
     }
   }
-  return analyzeHere(jpeg);
+  return analyzeHere(jpeg, opts);
 }
 
 export function disposeCodecs(): void {

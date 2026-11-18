@@ -1,11 +1,13 @@
 /** Worker thread: decodes JPEGs off the extension host's main thread (thumbnails, Auto-Rank). */
 import { parentPort } from 'worker_threads';
-import { analyzeHere, makeThumbHere, ThumbOptions } from './codec';
+import { AnalyzeOptions, analyzeHere, makeThumbHere, ThumbOptions } from './codec';
 
-parentPort?.on('message', async (m: { id: number; kind?: 'thumb' | 'analyze'; jpeg: Uint8Array; opts: ThumbOptions }) => {
+parentPort?.on('message', async (m: { id: number; kind?: 'thumb' | 'analyze'; jpeg: Uint8Array; opts: ThumbOptions & AnalyzeOptions }) => {
   try {
     if (m.kind === 'analyze') {
-      parentPort!.postMessage({ id: m.id, ok: true, analysis: await analyzeHere(m.jpeg) });
+      const analysis = await analyzeHere(m.jpeg, m.opts);
+      const px = analysis.pixels?.data;
+      parentPort!.postMessage({ id: m.id, ok: true, analysis }, px ? [px.buffer as ArrayBuffer] : []);
       return;
     }
     const t = await makeThumbHere(m.jpeg, m.opts);

@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { Analysis } from './core/analyze';
+import { Rgba } from './core/image';
 import { analyzeJpeg, codecThreads } from './core/codec';
 import { captureTime, embeddedPreviews, isBrowserJpeg, mpfPreviews, readExif } from './core/exif';
 import { extensionOf, isRaw } from './core/images';
@@ -25,8 +26,11 @@ interface Stored extends Analysis {
 const PEOPLE: PeopleSignal[] = ['eyes', 'looking', 'smile', 'natural'];
 type Choice = 'focus' | 'exposure' | 'similar' | 'people' | PeopleSignal | 'keepMine' | 'reject';
 
-/** Measures faces in a photo (JPEG bytes); undefined when that failed. */
-export type FaceDetector = (folder: vscode.Uri, data: Uint8Array, mime: string, modelFile: string) => Promise<FaceMetric[] | undefined>;
+/** Long edge of the image the face model gets (upright RGBA, made from the same decode). */
+const FACE_PX = 1600;
+
+/** Measures faces in a photo (upright RGBA pixels). */
+export type FaceDetector = (folder: vscode.Uri, pixels: Rgba, modelFile: string) => Promise<{ faces?: FaceMetric[]; error?: string }>;
 
 /**
  * Auto-Rank an album: measure each photo (focus, blown highlights, a look-alike hash, capture
@@ -44,6 +48,7 @@ export class AutoRanker {
     private readonly store: PhotoStore,
     private readonly edits: EditStore,
     private readonly faces: FaceDetector,
+    private readonly log: (line: string) => void = () => undefined,
   ) {}
 
   async run(folder: vscode.Uri): Promise<void> {
@@ -83,20 +88,35 @@ export class AutoRanker {
       { location: vscode.ProgressLocation.Notification, title: `Auto-ranking ${path.basename(folder.fsPath)}`, cancellable: true },
       async (progress, token) => {
         let doneCount = 0;
+        let faceRuns = 0;
+        let faceFails = 0;
+        let firstError: string | undefined;
         const step = 100 / photos.length;
-        await mapLimit(photos, model ? Math.min(codecThreads(), 3) : codecThreads(), async (p) => {
+        await mapLimit(photos, codecThreads(), async (p) => {
           if (token.isCancellationRequested) {
             return;
           }
           const prev = stored.get(p.name);
           const fresh = prev && prev.size === p.size && prev.mtime === p.mtime;
           if (!fresh || (model && !prev.faces)) {
-            const a = await this.analyze(p).catch(() => undefined);
+            const a = await this.analyze(p, model ? FACE_PX : 0).catch((err) => {
+              this.log(`Auto-Rank: could not read ${p.name}: ${err instanceof Error ? err.message : String(err)}`);
+              return undefined;
+            });
             if (a) {
-              const { bytes, ...m } = a;
+              const { pixels, ...m } = a;
               let faces = fresh ? prev.faces : undefined;
-              if (model && !token.isCancellationRequested) {
-                faces = (await this.faces(folder, bytes, 'image/jpeg', model).catch(() => undefined)) ?? faces;
+              if (model && pixels && !token.isCancellationRequested) {
+                faceRuns++;
+                const r = await this.faces(folder, pixels, model).catch((err) => ({ faces: undefined, error: String(err) }));
+                if (r.faces) {
+                  faces = r.faces;
+                  this.log(`Auto-Rank: ${p.name}: ${r.faces.length} face(s) ${JSON.stringify(r.faces)}`);
+                } else {
+                  faceFails++;
+                  firstError ??= r.error ?? 'no answer from the grid tab';
+                  this.log(`Auto-Rank: face model failed on ${p.name}: ${r.error ?? 'no answer from the grid tab'}`);
+                }
               }
               stored.set(p.name, { ...m, faces, size: p.size, mtime: p.mtime });
             }
@@ -104,6 +124,15 @@ export class AutoRanker {
           doneCount++;
           progress.report({ increment: step, message: `analysing ${doneCount} of ${photos.length}` });
         });
+        if (faceFails) {
+          const ok = faceRuns - faceFails;
+          void vscode.window
+            .showWarningMessage(
+              `The face model failed on ${faceFails} of ${faceRuns} photos${ok ? '' : ', so People was not used'}: ${firstError}`,
+              'Show Log',
+            )
+            .then((pick) => pick && vscode.commands.executeCommand('vsphoto.showLog'));
+        }
         return token.isCancellationRequested;
       },
     );
@@ -241,20 +270,22 @@ export class AutoRanker {
   }
 
   /** Bytes good enough to measure: the camera's built-in preview, else the whole file. */
-  private async analyze(p: Photo): Promise<(Analysis & { time?: number; bytes: Uint8Array }) | undefined> {
+  private async analyze(p: Photo, facePx: number): Promise<(Analysis & { time?: number; pixels?: Rgba }) | undefined> {
     const head = await readHead(p.uri.fsPath, 512 * 1024).catch(() => undefined);
     if (!head) {
       return undefined;
     }
-    const time = captureTime(readExif(head));
+    const exif = readExif(head);
+    const time = captureTime(exif);
+    const opts = { facePx: facePx || undefined, orientation: exif?.orientation };
     const ranges = isRaw(p.name) ? embeddedPreviews(head) : mpfPreviews(head);
     for (const r of ranges) {
       if (r.length > 8 * 1024 * 1024 || r.offset + r.length > p.size) continue;
       const bytes = r.offset + r.length <= head.length ? head.subarray(r.offset, r.offset + r.length) : await readRange(p.uri.fsPath, r.offset, r.length).catch(() => undefined);
       if (!bytes || bytes.length !== r.length || !isBrowserJpeg(bytes)) continue;
-      const a = await analyzeJpeg(bytes).catch(() => undefined);
+      const a = await analyzeJpeg(bytes, opts).catch(() => undefined);
       if (a && Math.max(a.sourceWidth, a.sourceHeight) >= 900) {
-        return { sharpness: a.sharpness, blown: a.blown, hash: a.hash, time, bytes };
+        return { sharpness: a.sharpness, blown: a.blown, hash: a.hash, time, pixels: a.pixels };
       }
     }
     const ext = extensionOf(p.name);
@@ -265,8 +296,8 @@ export class AutoRanker {
     if (!full) {
       return undefined;
     }
-    const a = await analyzeJpeg(full);
-    return { sharpness: a.sharpness, blown: a.blown, hash: a.hash, time, bytes: full };
+    const a = await analyzeJpeg(full, opts);
+    return { sharpness: a.sharpness, blown: a.blown, hash: a.hash, time, pixels: a.pixels };
   }
 
   private async pickChoices(album: string, count: number): Promise<Set<Choice> | undefined> {

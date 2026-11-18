@@ -7,7 +7,18 @@
   function load(rt) {
     if (!landmarker) {
       landmarker = (async () => {
-        const { FilesetResolver, FaceLandmarker } = await import(rt.bundle);
+        // The plain-script build (global `Vision`): a module (.mjs) import depends on the editor
+        // serving the right MIME type for .mjs, which not every VS Code build does.
+        if (!window.Vision) {
+          await new Promise((resolve, reject) => {
+            const s = document.createElement('script');
+            s.src = rt.bundle;
+            s.onload = resolve;
+            s.onerror = () => reject(new Error('could not load the face library (' + rt.bundle + ')'));
+            document.head.append(s);
+          });
+        }
+        const { FilesetResolver, FaceLandmarker } = window.Vision;
         const fileset = await FilesetResolver.forVisionTasks(rt.wasm);
         const options = (delegate) => ({
           baseOptions: { modelAssetPath: rt.model, delegate },
@@ -16,11 +27,8 @@
           outputFaceBlendshapes: true,
           outputFacialTransformationMatrixes: true,
         });
-        try {
-          return await FaceLandmarker.createFromOptions(fileset, options('GPU'));
-        } catch {
-          return await FaceLandmarker.createFromOptions(fileset, options('CPU'));
-        }
+        // CPU: predictable in every editor (the GPU path can stall in a webview); ~0.2 s a photo.
+        return await FaceLandmarker.createFromOptions(fileset, options('CPU'));
       })();
       landmarker.catch(() => (landmarker = undefined));
     }
@@ -71,33 +79,21 @@
     return { area: Math.round(area * 10000) / 10000, eyes: r(eyes), looking: r(looking), smile: r(smile), natural: r(natural) };
   }
 
-  /** Faces in a photo (JPEG bytes). Detection runs on a copy at most 1600 px wide. */
-  async function detect(data, mime, rt) {
+  /** Faces in a photo: upright RGBA pixels (already shrunk by the extension). */
+  async function detect(data, width, height, rt) {
     const fl = await load(rt);
-    const blob = new Blob([data], { type: mime || 'image/jpeg' });
-    let bmp = await createImageBitmap(blob, { imageOrientation: 'from-image' });
-    const long = Math.max(bmp.width, bmp.height);
-    if (long > 1600) {
-      const k = 1600 / long;
-      const small = await createImageBitmap(bmp, { resizeWidth: Math.round(bmp.width * k), resizeHeight: Math.round(bmp.height * k), resizeQuality: 'high' });
-      bmp.close();
-      bmp = small;
-    }
-    try {
-      const res = fl.detect(bmp);
-      return res.faceLandmarks.map((pts, i) =>
-        metric(res.faceBlendshapes[i] || { categories: [] }, (res.facialTransformationMatrixes || [])[i], pts),
-      );
-    } finally {
-      bmp.close();
-    }
+    const px = new Uint8ClampedArray(data.buffer, data.byteOffset, data.byteLength);
+    const res = fl.detect(new ImageData(px, width, height));
+    return res.faceLandmarks.map((pts, i) =>
+      metric(res.faceBlendshapes[i] || { categories: [] }, (res.facialTransformationMatrixes || [])[i], pts),
+    );
   }
 
   // One photo at a time: the model isn't re-entrant and this keeps memory flat.
   let queue = Promise.resolve();
   window.vsphoto.faces = {
-    detect: (data, mime, rt) => {
-      const run = queue.then(() => detect(data, mime, rt));
+    detect: (data, width, height, rt) => {
+      const run = queue.then(() => detect(data, width, height, rt));
       queue = run.catch(() => undefined);
       return run;
     },

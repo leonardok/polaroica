@@ -32,7 +32,8 @@ export function activate(context: vscode.ExtensionContext): void {
     context,
     store,
     edits,
-    (folder, data, mime, model) => grids.detectFaces(folder, data, mime, model),
+    (folder, pixels, model) => grids.detectFaces(folder, pixels, model),
+    (line) => output.appendLine(`[${new Date().toLocaleTimeString()}] ${line}`),
   );
   grids.setHost({
     openPhoto: (folder, name, sort) => viewers.open(folder, name, sort),
@@ -153,6 +154,7 @@ export function activate(context: vscode.ExtensionContext): void {
         void vscode.window.showInformationMessage('Right-click an album in Photo Libraries, or use the Auto-Rank button in a grid.');
       }
     }),
+    vscode.commands.registerCommand('vsphoto.showLog', () => output.show()),
     vscode.commands.registerCommand('vsphoto.undoAutoRank', async (arg?: unknown) => {
       let uri = uriOf(arg);
       if (!uri) {

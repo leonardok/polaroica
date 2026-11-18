@@ -11,6 +11,7 @@ import { EditStore } from './edits';
 import { fromWire, localRoots, post, webviewHtml } from './webview';
 import { modelsDir } from './faceModel';
 import { FaceMetric } from './core/rank';
+import { Rgba } from './core/image';
 
 type FromGrid =
   | { type: 'ready' }
@@ -135,12 +136,12 @@ export class GridPanels implements vscode.Disposable {
   }
 
   /** Face metrics for a photo, via the grid tab of its folder (opened if needed). */
-  async detectFaces(folder: vscode.Uri, data: Uint8Array, mime: string, modelFile: string): Promise<FaceMetric[] | undefined> {
+  async detectFaces(folder: vscode.Uri, pixels: Rgba, modelFile: string): Promise<{ faces?: FaceMetric[]; error?: string }> {
     if (!this.panels.get(folder.fsPath)) {
       this.open(folder);
     }
     const grid = this.panels.get(folder.fsPath);
-    return grid?.detectFaces(data, mime, modelFile);
+    return grid ? grid.detectFaces(pixels, modelFile) : { error: 'the grid tab could not be opened' };
   }
 
   /** A thumbnail made by the background builder: show it in an open grid of its folder. */
@@ -206,7 +207,7 @@ class GridPanel {
   readonly job: ThumbJob;
   private nextId = 1;
   private readonly pending = new Map<number, (t: Thumb | undefined) => void>();
-  private readonly pendingFaces = new Map<number, (f: FaceMetric[] | undefined) => void>();
+  private readonly pendingFaces = new Map<number, (r: { faces?: FaceMetric[]; error?: string }) => void>();
   private markReady!: () => void;
   /** Resolves once the page's script listens for messages. */
   private readonly ready = new Promise<void>((r) => (this.markReady = r));
@@ -247,7 +248,7 @@ class GridPanel {
   }
 
   /** Runs the face model on a photo in this tab (MediaPipe needs a browser page). */
-  async detectFaces(data: Uint8Array, mime: string, modelFile: string): Promise<FaceMetric[] | undefined> {
+  async detectFaces(pixels: Rgba, modelFile: string): Promise<{ faces?: FaceMetric[]; error?: string }> {
     await this.ready;
     const w = this.panel.webview;
     const ext = this.owner.ctx.context.extensionUri;
@@ -256,7 +257,7 @@ class GridPanel {
       const id = this.nextId++;
       const timer = setTimeout(() => {
         this.pendingFaces.delete(id);
-        resolve(undefined);
+        resolve({ error: 'the face model did not answer within 60 s' });
       }, 60000);
       this.pendingFaces.set(id, (f) => {
         clearTimeout(timer);
@@ -265,10 +266,11 @@ class GridPanel {
       void post(w, {
         type: 'faces',
         id,
-        data,
-        mime,
+        data: pixels.data,
+        width: pixels.width,
+        height: pixels.height,
         runtime: {
-          bundle: w.asWebviewUri(vscode.Uri.joinPath(mp, 'vision_bundle.mjs')).toString(),
+          bundle: w.asWebviewUri(vscode.Uri.joinPath(mp, 'vision_bundle.js')).toString(),
           wasm: w.asWebviewUri(vscode.Uri.joinPath(mp, 'wasm')).toString(),
           model: w.asWebviewUri(vscode.Uri.file(modelFile)).toString(),
         },
@@ -278,7 +280,7 @@ class GridPanel {
 
   dispose(): void {
     for (const r of this.pendingFaces.values()) {
-      r(undefined);
+      r({ error: 'the grid tab was closed' });
     }
     this.pendingFaces.clear();
     this.job.dispose();
@@ -401,7 +403,7 @@ class GridPanel {
       case 'facesResult': {
         const r = this.pendingFaces.get(m.id);
         this.pendingFaces.delete(m.id);
-        r?.(m.error ? undefined : (m.faces ?? []));
+        r?.(m.error ? { error: m.error } : { faces: m.faces ?? [] });
         break;
       }
       case 'makeBest':
