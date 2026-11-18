@@ -1,8 +1,11 @@
 src/**
 out/test/**
 docs/**
-node_modules/**
 .vscode/**
 **/*.map
 tsconfig.json
 .gitignore
+node_modules/@jsquash/jpeg/codec/enc/**
+node_modules/@jsquash/webp/codec/dec/**
+node_modules/**/*.d.ts
+node_modules/**/*.md

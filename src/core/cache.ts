@@ -58,7 +58,12 @@ export interface Thumb {
   data: Buffer;
   w: number;
   h: number;
+  /** A quick thumbnail (from the small EXIF preview), waiting to be replaced by a sharp one. */
+  quick?: boolean;
 }
+
+/** `px` value stored for quick thumbnails. */
+export const QUICK_PX = 0;
 
 export class FolderCache {
   private data: IndexData;
@@ -134,9 +139,17 @@ export class FolderCache {
 
   // ---- thumbnails ----
 
+  /** A sharp thumbnail at size `px`, or with `px` = QUICK_PX, any thumbnail at all. */
   hasThumb(name: string, size: number, mtime: number, px: number): boolean {
     const e = this.data.thumbs[name];
-    return !!e && e.size === size && e.mtime === mtime && e.px === px;
+    if (!e || e.size !== size || e.mtime !== mtime) {
+      return false;
+    }
+    return px === QUICK_PX ? true : e.px === px;
+  }
+
+  private usable(e: ThumbEntry | undefined, size: number, mtime: number, px: number, includeQuick: boolean): boolean {
+    return !!e && e.size === size && e.mtime === mtime && (e.px === px || (includeQuick && e.px === QUICK_PX));
   }
 
   get thumbCount(): number {
@@ -144,9 +157,13 @@ export class FolderCache {
   }
 
   /** Reads several thumbnails with one open file handle. */
-  async getThumbs(items: Array<{ name: string; size: number; mtime: number }>, px: number): Promise<Map<string, Thumb>> {
+  async getThumbs(
+    items: Array<{ name: string; size: number; mtime: number }>,
+    px: number,
+    includeQuick = false,
+  ): Promise<Map<string, Thumb>> {
     const out = new Map<string, Thumb>();
-    const wanted = items.filter((i) => this.hasThumb(i.name, i.size, i.mtime, px));
+    const wanted = items.filter((i) => this.usable(this.data.thumbs[i.name], i.size, i.mtime, px, includeQuick));
     if (!wanted.length) {
       return out;
     }
@@ -164,7 +181,7 @@ export class FolderCache {
           const buf = Buffer.alloc(e.len);
           const { bytesRead } = await fh.read(buf, 0, e.len, e.off);
           if (bytesRead === e.len) {
-            out.set(i.name, { data: buf, w: e.w, h: e.h });
+            out.set(i.name, { data: buf, w: e.w, h: e.h, quick: e.px === QUICK_PX });
           }
         }
       } finally {
@@ -179,6 +196,10 @@ export class FolderCache {
 
   async putThumb(name: string, size: number, mtime: number, px: number, t: Thumb): Promise<void> {
     await this.serial(async () => {
+      const cur = this.data.thumbs[name];
+      if (px === QUICK_PX && cur && cur.size === size && cur.mtime === mtime && cur.px !== QUICK_PX) {
+        return; // never replace a sharp thumbnail with a quick one
+      }
       await fs.promises.mkdir(this.dir, { recursive: true });
       const old = this.data.thumbs[name];
       const off = this.data.packSize;
@@ -317,10 +338,10 @@ export class CacheManager {
     px: number,
   ): Promise<void> {
     const src = await this.folder(from.folder);
-    const t = (await src.getThumbs([from], px)).get(from.name);
+    const t = (await src.getThumbs([from], px, true)).get(from.name);
     src.dropThumb(from.name);
     if (t) {
-      await (await this.folder(to.folder)).putThumb(to.name, to.size, to.mtime, px, t);
+      await (await this.folder(to.folder)).putThumb(to.name, to.size, to.mtime, t.quick ? QUICK_PX : px, t);
     }
   }
 

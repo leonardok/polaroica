@@ -44,15 +44,26 @@ Photos on a network share are big and the network is slow, so the extension keep
 cache** on this computer (in VS Code's extension storage, never on the share):
 
 - **Thumbnails**: 256 px WebP, about 5 KB each, packed into one file per folder. The grid only
-  ever shows thumbnails. The first time a folder is opened, on-screen photos get the small preview
-  embedded in their EXIF straight away, then a proper thumbnail (each original is read from the
-  share once). After that the folder's thumbnails load from local disk in milliseconds.
+  ever shows thumbnails; after the first visit a folder's thumbnails load from local disk in
+  milliseconds.
+- **Background build**: two background workers make thumbnails for every photo in every library,
+  with progress in the status bar (`Thumbnails: quick 12,345/100,000 · sharp 4,000/100,000`):
+  - **quick pass**: the small preview each camera JPEG carries in its EXIF (one ~72 KB read),
+    letterbox bars trimmed and rotated upright, so the whole library becomes browsable fast;
+  - **sharp pass**: proper thumbnails from the ~1600 px preview many cameras store inside the JPEG
+    (MPF), about 0.3 MB read instead of the whole file; photos without one fall back to a full read.
+
+  Decoding uses WebAssembly codecs (mozjpeg, libwebp) on worker threads, so the editor stays
+  responsive. The workers read the share gently, wait while you browse, skip what is already cached
+  (a restart continues where it stopped) and stop if the cache is full. **Photo Library: Thumbnail
+  Progress…** shows the details and can pause, resume or stop; **Build All Thumbnails** starts a
+  run; `vsphoto.backgroundThumbnails` turns the automatic build off.
 - **Folder index**: file names, sizes, dates and EXIF. Folders and the tree's photo counts appear
   instantly from the index; the share is re-checked in the background.
 - **Photo tabs** show the cached thumbnail at once, scaled up, while the original streams in, then
   preload the previous and next photos. The filmstrip uses thumbnails.
 - **Moves** carry the cached thumbnail along, so it is not generated again.
-- Cache size is capped (`vsphoto.cacheSizeMB`, default 512 MB ≈ 100,000 photos); the least recently
+- Cache size is capped (`vsphoto.cacheSizeMB`, default 1 GB ≈ 200,000 photos); the least recently
   viewed folders are removed first. **Photo Library: Show Cache Info** shows the size and the
   average thumbnail size, and can clear it.
 
@@ -69,7 +80,8 @@ display as a labelled placeholder for now.
 | `vsphoto.sortBy` | `name` | Default order: `name`, `modified` or `size`. |
 | `vsphoto.showPhotoCounts` | `true` | Photo counts in the tree. |
 | `vsphoto.thumbnailSize` | `256` | Thumbnail long edge: 192, 256 or 320 px (≈ 4 / 6 / 9 KB each). |
-| `vsphoto.cacheSizeMB` | `512` | Disk space for the local cache. |
+| `vsphoto.cacheSizeMB` | `1024` | Disk space for the local cache. |
+| `vsphoto.backgroundThumbnails` | `true` | Build thumbnails for the whole library in the background. |
 
 ## Develop
 
@@ -90,9 +102,7 @@ npx @vscode/vsce package
 
 ## Known limitations / next steps
 
-- Thumbnails are made only for folders you open (on-screen photos first, then the rest of the
-  folder while its grid is visible). A "build thumbnails for the whole library" command could come
-  later.
+- Photo editing (Adjust panel) is designed (canvas page v1.1.0) but not built yet.
 - Dragging photos from the grid onto the tree uses the standard `text/uri-list` drag data; if your
   editor doesn't accept drops from webviews, use *Move to…*.
 - File-change watching may not fire for every SMB server; use **Refresh** in the view title or

@@ -4,16 +4,18 @@ import { GridPanels } from './grid';
 import { Libraries } from './libraries';
 import { Mover } from './move';
 import { CacheManager } from './core/cache';
+import { disposeCodecs } from './core/codec';
 import { formatBytes } from './core/images';
 import { PhotoStore } from './photoStore';
 import { ThumbService } from './thumbs';
+import { BackgroundThumbnails } from './background';
 import { FolderNode, LibraryNode, LibraryTree, TreeNode } from './tree';
 import { PhotoViewers } from './viewer';
 
 export function activate(context: vscode.ExtensionContext): void {
   const libraries = new Libraries(context);
   const cacheDir = vscode.Uri.joinPath(context.globalStorageUri, 'cache-v1').fsPath;
-  const capMb = () => vscode.workspace.getConfiguration('vsphoto').get<number>('cacheSizeMB', 512);
+  const capMb = () => vscode.workspace.getConfiguration('vsphoto').get<number>('cacheSizeMB', 1024);
   const cache = new CacheManager(cacheDir, capMb() * 1024 * 1024);
   const store = new PhotoStore(cache);
   const thumbs = new ThumbService(store);
@@ -21,6 +23,10 @@ export function activate(context: vscode.ExtensionContext): void {
   const grids = new GridPanels(context, libraries, store, mover, thumbs);
   const viewers = new PhotoViewers(context, libraries, store, mover, thumbs);
   grids.setHost({ openPhoto: (folder, name, sort) => viewers.open(folder, name, sort) });
+  const background = new BackgroundThumbnails(libraries, store, thumbs, () => capMb() * 1024 * 1024, (photo, t) =>
+    grids.offer(photo, t),
+  );
+  background.schedule();
 
   const tree = new LibraryTree(libraries, store, async (files, target) => {
     await mover.move(files, target);
@@ -69,13 +75,25 @@ export function activate(context: vscode.ExtensionContext): void {
     viewers,
     view,
     { dispose: () => watchers.forEach((w) => w.dispose()) },
+    background,
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
       rewatch();
       tree.refresh();
+      background.schedule(3000);
     }),
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration('vsphoto.cacheSizeMB')) {
         cache.setCap(capMb() * 1024 * 1024);
+      }
+      if (e.affectsConfiguration('vsphoto.backgroundThumbnails')) {
+        if (background.enabled) {
+          background.schedule(1000);
+        } else {
+          background.stop();
+        }
+      }
+      if (e.affectsConfiguration('vsphoto.thumbnailSize')) {
+        background.schedule(3000);
       }
       if (e.affectsConfiguration('vsphoto.showPhotoCounts') || e.affectsConfiguration('vsphoto.sortBy')) {
         tree.refresh();
@@ -94,8 +112,24 @@ export function activate(context: vscode.ExtensionContext): void {
         clear,
       );
       if (pick === clear) {
+        background.stop();
         await cache.clear();
         store.invalidate();
+        background.schedule(3000);
+      }
+    }),
+    vscode.commands.registerCommand('vsphoto.buildThumbnails', () => background.start()),
+    vscode.commands.registerCommand('vsphoto.thumbnailProgress', async () => {
+      const running = background.status === 'running';
+      const paused = background.status === 'paused';
+      const actions = running ? ['Pause', 'Stop'] : paused ? ['Resume', 'Stop'] : ['Start'];
+      const pick = await vscode.window.showInformationMessage(background.summary(), ...actions);
+      if (pick === 'Pause') {
+        background.pause();
+      } else if (pick === 'Resume' || pick === 'Start') {
+        background.resume();
+      } else if (pick === 'Stop') {
+        background.stop();
       }
     }),
     vscode.commands.registerCommand('vsphoto.removeLibrary', async (node?: TreeNode) => {
@@ -140,5 +174,5 @@ export function activate(context: vscode.ExtensionContext): void {
 }
 
 export function deactivate(): void {
-  /* nothing: disposables are on the context */
+  disposeCodecs();
 }

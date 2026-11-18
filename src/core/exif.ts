@@ -299,6 +299,80 @@ export function embeddedPreviews(head: Uint8Array): ByteRange[] {
   return [...unique.values()].sort((a, b) => b.length - a.length);
 }
 
+/**
+ * Preview images stored in a JPEG's MPF (Multi-Picture Format, APP2) segment, largest first, as
+ * absolute file offsets. Many cameras store a ~1600 px preview here, at the end of the file. The
+ * MPF segment sits near the start, so the first 64–128 KB of the file is enough to find it.
+ */
+export function mpfPreviews(head: Uint8Array): ByteRange[] {
+  if (head.length < 4 || head[0] !== 0xff || head[1] !== 0xd8) {
+    return [];
+  }
+  let off = 2;
+  while (off + 4 <= head.length) {
+    if (head[off] !== 0xff) {
+      return [];
+    }
+    const marker = head[off + 1];
+    if (marker === 0xda || marker === 0xd9) {
+      return [];
+    }
+    const len = (head[off + 2] << 8) | head[off + 3];
+    if (
+      marker === 0xe2 &&
+      off + 8 + 8 <= head.length &&
+      head[off + 4] === 0x4d && // M
+      head[off + 5] === 0x50 && // P
+      head[off + 6] === 0x46 && // F
+      head[off + 7] === 0x00
+    ) {
+      return parseMpf(head, off + 8, Math.min(head.length, off + 2 + len));
+    }
+    off += 2 + len;
+  }
+  return [];
+}
+
+function parseMpf(buf: Uint8Array, base: number, end: number): ByteRange[] {
+  const little = buf[base] === 0x49;
+  if (!little && buf[base] !== 0x4d) {
+    return [];
+  }
+  const v = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  const u16 = (o: number) => v.getUint16(o, little);
+  const u32 = (o: number) => v.getUint32(o, little);
+  const ifd = base + u32(base + 4);
+  if (ifd + 2 > end) {
+    return [];
+  }
+  const n = u16(ifd);
+  let count = 0;
+  let entriesAt = -1;
+  for (let i = 0; i < n && ifd + 2 + (i + 1) * 12 <= end; i++) {
+    const e = ifd + 2 + i * 12;
+    const tag = u16(e);
+    if (tag === 0xb001) {
+      count = u32(e + 8);
+    } else if (tag === 0xb002) {
+      entriesAt = base + u32(e + 8);
+    }
+  }
+  if (count < 2 || count > 32 || entriesAt < 0 || entriesAt + count * 16 > end) {
+    return [];
+  }
+  const out: ByteRange[] = [];
+  for (let i = 0; i < count; i++) {
+    const e = entriesAt + i * 16;
+    const size = u32(e + 4);
+    const rel = u32(e + 8);
+    if (rel === 0 || size === 0) {
+      continue; // the primary image itself
+    }
+    out.push({ offset: base + rel, length: size });
+  }
+  return out.sort((a, b) => b.length - a.length);
+}
+
 /** True when bytes look like a baseline/progressive JPEG a browser can decode. */
 export function isBrowserJpeg(bytes: Uint8Array): boolean {
   if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) {

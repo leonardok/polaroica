@@ -160,6 +160,7 @@ class PhotoViewer {
       total: this.photos.length,
       photo: view,
       thumb: cached.get(photo.name)?.data,
+      thumbQuick: cached.get(photo.name)?.quick,
       // RAW: the preview JPEG embedded in the file is sent separately once read.
       waitForPreview: raw,
       strip: near.map((p, k) => ({
@@ -188,9 +189,9 @@ class PhotoViewer {
       );
     } else if (!cached.has(photo.name)) {
       work.push(
-        this.owner.thumbs.placeholder(photo).then((data) => {
-          if (data && this.current === photo) {
-            void post(webview, { type: 'placeholder', name: photo.name, data });
+        this.owner.thumbs.quick(photo, this.owner.thumbs.fgHeads).then((t) => {
+          if (t && this.current === photo) {
+            void post(webview, { type: 'placeholder', name: photo.name, data: t.data });
           }
         }),
       );

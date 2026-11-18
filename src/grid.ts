@@ -92,6 +92,12 @@ export class GridPanels implements vscode.Disposable {
     });
   }
 
+  /** A thumbnail made by the background builder: show it in an open grid of its folder. */
+  offer(photo: Photo, t: Thumb): void {
+    const grid = this.panels.get(path.dirname(photo.uri.fsPath));
+    grid?.job.offer(photo, t);
+  }
+
   /** Forget panels for a folder that was moved away. */
   closeFor(folder: vscode.Uri): void {
     for (const [k, p] of this.panels) {

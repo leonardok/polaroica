@@ -22,7 +22,7 @@
     noteEl = h('div', { class: 'loading', role: 'status' }, 'Loading photo…');
     frameEl = h('div', { class: 'frame ' + zoom, ondblclick: () => post({ type: 'grid' }), title: 'Double-click to go back to the grid' });
     if (m.thumb) {
-      frameEl.append(h('img', { class: 'photo standin', src: track(blobUrl(m.thumb, 'image/webp')), alt: '' }));
+      frameEl.append(h('img', { class: 'photo standin' + (m.thumbQuick ? ' soft' : ''), src: track(blobUrl(m.thumb, 'image/webp')), alt: '' }));
     }
     if (m.photo.src) {
       showMain(m.photo.src, m.photo.name);
@@ -169,7 +169,7 @@
       case 'placeholder':
         // Small EXIF preview while the original loads (no cached thumbnail yet).
         if (current && current.photo.name === m.name && frameEl && !frameEl.querySelector('.standin') && !frameEl.querySelector('.main.ready')) {
-          frameEl.prepend(h('img', { class: 'photo standin soft', src: track(blobUrl(m.data, 'image/jpeg')), alt: '' }));
+          frameEl.prepend(h('img', { class: 'photo standin soft', src: track(blobUrl(m.data, 'image/webp')), alt: '' }));
         }
         break;
       case 'preview':
