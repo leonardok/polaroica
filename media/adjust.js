@@ -367,15 +367,16 @@ void main() {
     // Tone curve editor
     const SVG = 'http://www.w3.org/2000/svg';
     const svg = document.createElementNS(SVG, 'svg');
-    svg.setAttribute('viewBox', '0 0 255 255');
+    // Half as tall as wide: output values are drawn at half scale vertically (Y = 255 → 0, 0 → 127.5).
+    svg.setAttribute('viewBox', '0 0 255 127.5');
     svg.setAttribute('class', 'curve');
     svg.setAttribute('role', 'img');
     svg.setAttribute('aria-label', 'Tone curve: click to add a point, drag to move, double-click a point to remove it');
     const grid = document.createElementNS(SVG, 'path');
-    grid.setAttribute('d', 'M64 0V255M128 0V255M191 0V255M0 64H255M0 128H255M0 191H255');
+    grid.setAttribute('d', 'M64 0V127.5M128 0V127.5M191 0V127.5M0 32H255M0 64H255M0 96H255');
     grid.setAttribute('class', 'curve-grid');
     const diag = document.createElementNS(SVG, 'path');
-    diag.setAttribute('d', 'M0 255L255 0');
+    diag.setAttribute('d', 'M0 127.5L255 0');
     diag.setAttribute('class', 'curve-diag');
     const line = document.createElementNS(SVG, 'path');
     line.setAttribute('class', 'curve-line');
@@ -388,16 +389,16 @@ void main() {
       const t = curveTable(pts);
       let d = '';
       for (let x = 0; x < 256; x += 3) {
-        d += (x ? 'L' : 'M') + x + ' ' + (255 - t[x] * 255).toFixed(1);
+        d += (x ? 'L' : 'M') + x + ' ' + ((255 - t[x] * 255) / 2).toFixed(1);
       }
-      d += 'L255 ' + (255 - t[255] * 255).toFixed(1);
+      d += 'L255 ' + ((255 - t[255] * 255) / 2).toFixed(1);
       line.setAttribute('d', d);
       line.setAttribute('stroke', colors[channel]);
       dots.replaceChildren(
         ...pts.map((p, i) => {
           const c = document.createElementNS(SVG, 'circle');
           c.setAttribute('cx', String(p[0]));
-          c.setAttribute('cy', String(255 - p[1]));
+          c.setAttribute('cy', String((255 - p[1]) / 2));
           c.setAttribute('r', '6');
           c.setAttribute('class', 'curve-point');
           c.setAttribute('stroke', colors[channel]);
