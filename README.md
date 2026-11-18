@@ -34,7 +34,9 @@ can already reach.
   best of each group of similar shots**, and stacks the groups in the grid. Photos you rated yourself
   are left alone; nothing is rejected unless you ask. Ratings it set carry a ✦ until you change them.
   The **AUTO-RANK** section (grid and photo tab) explains each rank with a radar chart and lets you
-  choose another shot as a group's best. **Undo Auto-Rank** restores the previous ratings.
+  choose another shot as a group's best. When it finishes, a notification sums up the run with an
+  **Undo** button; the **Undo Auto-Rank** command (Command Palette, or right-click the album)
+  restores the previous ratings later too.
 - **People** (an Auto-Rank option, with sub-options **Eyes open**, **Looking at the camera**,
   **Smiling** and **Natural expression**): a face model (MediaPipe Face Landmarker, Apache-2.0)
   scores each face's expression, so in a burst the frame where nobody blinks and everyone faces the

@@ -32,7 +32,6 @@ export function activate(context: vscode.ExtensionContext): void {
     context,
     store,
     edits,
-    (folder, summary) => grids.autoRankDone(folder, summary),
     (folder, data, mime, model) => grids.detectFaces(folder, data, mime, model),
   );
   grids.setHost({
@@ -153,6 +152,26 @@ export function activate(context: vscode.ExtensionContext): void {
       } else {
         void vscode.window.showInformationMessage('Right-click an album in Photo Libraries, or use the Auto-Rank button in a grid.');
       }
+    }),
+    vscode.commands.registerCommand('vsphoto.undoAutoRank', async (arg?: unknown) => {
+      let uri = uriOf(arg);
+      if (!uri) {
+        const albums = ranker.undoable();
+        if (!albums.length) {
+          void vscode.window.showInformationMessage('Nothing to undo: no album was auto-ranked in this window.');
+          return;
+        }
+        if (albums.length === 1) {
+          uri = albums[0];
+        } else {
+          const pick = await vscode.window.showQuickPick(
+            albums.map((a) => ({ label: path.basename(a.fsPath), description: path.dirname(a.fsPath), uri: a })),
+            { title: 'Undo Auto-Rank', placeHolder: 'Which album? (most recent first)' },
+          );
+          uri = pick?.uri;
+        }
+      }
+      if (uri) await ranker.undoRun(uri);
     }),
     vscode.commands.registerCommand('vsphoto.buildThumbnails', () => background.start()),
     vscode.commands.registerCommand('vsphoto.thumbnailProgress', async () => {

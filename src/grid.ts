@@ -143,14 +143,6 @@ export class GridPanels implements vscode.Disposable {
     return grid?.detectFaces(data, mime, modelFile);
   }
 
-  /** Tell an open grid of this folder that Auto-Rank finished (banner with Undo). */
-  autoRankDone(folder: vscode.Uri, summary: string | undefined): void {
-    const grid = this.panels.get(folder.fsPath);
-    if (grid) {
-      void post(grid.panel.webview, { type: 'autoRankDone', summary });
-    }
-  }
-
   /** A thumbnail made by the background builder: show it in an open grid of its folder. */
   offer(photo: Photo, t: Thumb): void {
     const grid = this.panels.get(path.dirname(photo.uri.fsPath));

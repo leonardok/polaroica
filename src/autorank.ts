@@ -36,12 +36,13 @@ export type FaceDetector = (folder: vscode.Uri, data: Uint8Array, mime: string, 
  */
 export class AutoRanker {
   private readonly undo = new Map<string, Array<{ photo: vscode.Uri; before: Sidecar }>>();
+  /** Albums with a run that can be undone, most recent last. */
+  private readonly undoOrder: string[] = [];
 
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly store: PhotoStore,
     private readonly edits: EditStore,
-    private readonly done: (folder: vscode.Uri, summary: string | undefined) => void,
     private readonly faces: FaceDetector,
   ) {}
 
@@ -149,6 +150,8 @@ export class AutoRanker {
       },
     );
     this.undo.set(folder.fsPath, undo);
+    this.undoOrder.splice(0, this.undoOrder.length, ...this.undoOrder.filter((f) => f !== folder.fsPath), folder.fsPath);
+    void this.updateUndoContext();
 
     const groups = new Set(results.filter((r) => r.group).map((r) => r.group!.id)).size;
     const blurry = results.filter((r) => r.notes.includes('blurry')).length;
@@ -170,17 +173,40 @@ export class AutoRanker {
       '.' +
       (kept ? ` ${kept} you had already rated were left as they were.` : '') +
       (missed ? ` ${missed} could not be read.` : '');
-    this.done(folder, summary);
+    // A notification instead of a banner in the grid; Undo is also a command (Undo Auto-Rank).
+    void vscode.window.showInformationMessage(summary, 'Undo').then((pick) => {
+      if (pick === 'Undo') void this.undoRun(folder);
+    });
+  }
+
+  /** Albums whose last Auto-Rank can be undone (this session), most recent first. */
+  undoable(): vscode.Uri[] {
+    return [...this.undoOrder].reverse().map((f) => vscode.Uri.file(f));
+  }
+
+  canUndo(folder: vscode.Uri): boolean {
+    return this.undo.has(folder.fsPath);
   }
 
   async undoRun(folder: vscode.Uri): Promise<void> {
     const list = this.undo.get(folder.fsPath);
     if (!list) {
+      void vscode.window.showInformationMessage(`There is no Auto-Rank of “${path.basename(folder.fsPath)}” to undo.`);
       return;
     }
     this.undo.delete(folder.fsPath);
-    await mapLimit(list, 6, (u) => this.edits.write(u.photo, u.before));
-    this.done(folder, undefined);
+    const i = this.undoOrder.indexOf(folder.fsPath);
+    if (i >= 0) this.undoOrder.splice(i, 1);
+    void this.updateUndoContext();
+    await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: 'Restoring the previous ratings' },
+      () => mapLimit(list, 6, (u) => this.edits.write(u.photo, u.before)),
+    );
+    void vscode.window.showInformationMessage(`Auto-Rank of “${path.basename(folder.fsPath)}” undone: ${list.length} photo${list.length === 1 ? '' : 's'} restored.`);
+  }
+
+  private updateUndoContext(): Thenable<unknown> {
+    return vscode.commands.executeCommand('setContext', 'vsphoto.canUndoAutoRank', this.undoOrder.length > 0);
   }
 
   /** Make another shot of a similar group its best (pick), instead of the one Auto-Rank chose. */

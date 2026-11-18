@@ -12,7 +12,7 @@
   let tileSize = (vscode.getState() || {}).tileSize || 160;
   /** Culling view: which photos show. Remembered per tab. */
   let view = Object.assign({ filter: 'all', hideRejects: false, minStars: 0, stack: true }, (vscode.getState() || {}).view || {});
-  let filterBarEl, bannerEl, lastDetails;
+  let filterBarEl, lastDetails;
   let tiles = [];
   let tileByName = new Map();
   let gridEl, detailsEl, countEl;
@@ -291,21 +291,6 @@
     if (lastDetails) renderDetails(lastDetails);
   }
 
-  function showBanner(summary) {
-    if (!bannerEl) return;
-    if (!summary) {
-      bannerEl.hidden = true;
-      return;
-    }
-    bannerEl.hidden = false;
-    bannerEl.replaceChildren(
-      icon('spark', 14),
-      h('span', { class: 'grow' }, summary),
-      h('button', { class: 'btn', onclick: () => { post({ type: 'undoAutoRank' }); showBanner(undefined); } }, 'Undo Auto-Rank'),
-      h('button', { class: 'icon-btn', 'aria-label': 'Close', title: 'Close', onclick: () => showBanner(undefined) }, icon('x', 14)),
-    );
-  }
-
   // ---- rendering ---------------------------------------------------------------------
 
   function render(state) {
@@ -414,7 +399,6 @@
     });
     gridEl.append(...tiles);
     filterBarEl = h('div', { class: 'filterbar' });
-    bannerEl = h('div', { class: 'banner', role: 'status', hidden: true });
 
     detailsEl = h('aside', { class: 'details', 'aria-label': 'Photo details' });
     renderDetails(undefined);
@@ -435,7 +419,6 @@
             h('label', {}, 'Size', size),
             h('button', { class: 'icon-btn', 'aria-label': 'Refresh', title: 'Refresh', onclick: () => post({ type: 'refresh' }) }, icon('refresh')),
           ),
-          bannerEl,
           photos.length ? filterBarEl : null,
           photos.length ? gridEl : h('div', { class: 'message' }, 'No photos in this folder. Sub-folders are in the Photo Libraries tree.'),
         ),
@@ -612,9 +595,6 @@
         }
         break;
       }
-      case 'autoRankDone':
-        showBanner(m.summary);
-        break;
       case 'faces':
         window.vsphoto.faces
           .detect(window.vsphoto.bytes(m.data), m.mime, m.runtime)

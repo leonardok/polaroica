@@ -182,22 +182,6 @@
 .seg-count {
   color: var(--muted);
 }
-.banner {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 20px;
-  background: var(--vscode-inputValidation-infoBackground, #0f2a40);
-  border-bottom: 1px solid var(--vscode-inputValidation-infoBorder, #1c4a6e);
-  font-size: 12px;
-}
-.banner .grow {
-  flex: 1;
-}
-.banner .btn {
-  height: 22px;
-  font-size: 12px;
-}
 .tile[hidden] {
   display: none;
 }

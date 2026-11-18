@@ -2,7 +2,7 @@
   "name": "vsphoto",
   "displayName": "Photo Library",
   "description": "Browse and organize photo libraries — local folders and SMB network shares — inside VS Code.",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "publisher": "leonardok",
   "license": "GPL-3.0-or-later",
   "repository": {
@@ -120,6 +120,13 @@
         "title": "Auto-Rank Album…",
         "category": "Photo Library",
         "icon": "$(sparkle)"
+      },
+      {
+        "command": "vsphoto.undoAutoRank",
+        "title": "Undo Auto-Rank",
+        "category": "Photo Library",
+        "icon": "$(discard)",
+        "enablement": "vsphoto.canUndoAutoRank"
       }
     ],
     "menus": {
@@ -145,6 +152,11 @@
           "command": "vsphoto.autoRank",
           "when": "view == vsphoto.libraries && viewItem =~ /^(library|folder)$/",
           "group": "1_open@2"
+        },
+        {
+          "command": "vsphoto.undoAutoRank",
+          "when": "view == vsphoto.libraries && viewItem =~ /^(library|folder)$/ && vsphoto.canUndoAutoRank",
+          "group": "1_open@3"
         },
         {
           "command": "vsphoto.newFolder",
