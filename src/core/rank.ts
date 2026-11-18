@@ -13,6 +13,10 @@ export interface FaceMetric {
   looking: number; // facing the camera, eyes not looking away
   smile: number;
   natural: number; // not mid-word, not frowning
+  /** Focus inside the face box, 0–100 (absolute); absent when the face is too small to judge. */
+  focus?: number;
+  /** Face box in the upright photo, as fractions: [x, y, width, height]. */
+  box?: [number, number, number, number];
 }
 
 export interface RankInput extends Analysis {
@@ -43,6 +47,8 @@ export interface RankOptions {
 
 /** Faces smaller than this share of the frame (background people) are ignored. */
 const MIN_FACE_AREA = 0.002;
+/** Faces at least this big (0.8% of the frame, ~110 px wide at 1600 px) decide the focus. */
+const SUBJECT_FACE_AREA = 0.008;
 
 /**
  * One score per signal for a photo's faces, weighted by face size. For "eyes open" the worst face
@@ -60,6 +66,23 @@ export function peopleScores(faces: FaceMetric[] | undefined, signals: PeopleSig
     out[k] = k === 'eyes' ? 0.7 * Math.min(...fs.map((f) => f.eyes)) + 0.3 * mean('eyes') : mean(k);
   }
   return out;
+}
+
+/**
+ * How sharp the subject is, 0–100 (absolute): with faces, the sharpest of the main faces (one
+ * person in focus is the photographer's choice; a blurred background doesn't count against it);
+ * otherwise (no faces, or only small background ones) the sharpest part of the frame. Undefined for photos measured before this existed
+ * (then focus falls back to the album-relative edge measure).
+ */
+export function subjectFocus(p: RankInput): number | undefined {
+  // Only faces big enough to be the subject: a small, blurred person in the background of a
+  // sharp close-up (a figurine with a child far behind) mustn't make the photo "out of focus".
+  const faces = (p.faces ?? []).filter((f) => f.area >= SUBJECT_FACE_AREA && f.focus !== undefined);
+  if (faces.length) {
+    const largest = Math.max(...faces.map((f) => f.area));
+    return Math.max(...faces.filter((f) => f.area >= largest * 0.25).map((f) => f.focus!));
+  }
+  return p.frameFocus;
 }
 
 export interface RankResult {
@@ -147,7 +170,7 @@ export function rankAlbum(items: RankInput[], opts: RankOptions): RankResult[] {
   // Focus relative to this album: the median photo scores 50, 4× sharper 100, 4× softer 0.
   // That way an album of soft night shots isn't all "blurry".
   const med = median(items.map((p) => p.sharpness)) || 1;
-  const focus = (p: RankInput) => clamp(50 + 25 * Math.log2(Math.max(p.sharpness, 1e-6) / med));
+  const focus = (p: RankInput) => subjectFocus(p) ?? clamp(50 + 25 * Math.log2(Math.max(p.sharpness, 1e-6) / med));
   const exposure = (p: RankInput) => clamp(100 - p.blown * 400); // 25% of the frame blown = 0
 
   const signals = opts.people ?? [];

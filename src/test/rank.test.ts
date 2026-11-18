@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { analyzePixels, hamming } from '../core/analyze';
-import { groupSimilar, rankAlbum, RankInput } from '../core/rank';
+import { groupSimilar, rankAlbum, RankInput, subjectFocus } from '../core/rank';
 
 /** A 200×150 test image: a pattern, optionally blurred and with a blown-out area. */
 function image(opts: { seed: number; blur?: number; blownRows?: number }) {
@@ -159,4 +159,19 @@ test('rejects you keep are never the best of a group; the best kept shot is pick
 
   const all = rankAlbum([p('a.jpg', 0, 50, true), p('b.jpg', 1, 30, true)], opts);
   assert.ok(all.every((r) => !r.group?.best && r.flag !== 'pick'), 'all rejected: nothing picked');
+});
+
+test('focus: measured on the subject, not the whole frame', () => {
+  const face = (area: number, focus: number) => ({ area, eyes: 100, looking: 100, smile: 50, natural: 100, focus });
+  const base = { name: 'x.jpg', sharpness: 1, blown: 0, hash: hashWith(0), frameFocus: 40 };
+  // Portrait: sharp face, blurred background (low frame focus): the face decides.
+  assert.equal(subjectFocus({ ...base, faces: [face(0.09, 95)] }), 95);
+  // Missed focus: background sharp, face soft.
+  assert.equal(subjectFocus({ ...base, frameFocus: 95, faces: [face(0.09, 10)] }), 10);
+  // Group: the sharpest of the main faces (a small face far behind doesn't count).
+  assert.equal(subjectFocus({ ...base, faces: [face(0.02, 80), face(0.025, 60), face(0.003, 99)] }), 80);
+  // Sharp figurine in front, a small blurred child in the background: the frame decides.
+  assert.equal(subjectFocus({ ...base, frameFocus: 92, faces: [face(0.004, 5)] }), 92);
+  // No faces: the frame.
+  assert.equal(subjectFocus({ ...base, faces: [] }), 40);
 });

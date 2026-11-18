@@ -33,8 +33,8 @@ interface Stored extends Analysis {
   facesV?: number;
 }
 
-/** 2: face detector first, then each face read on its own crop. */
-const FACES_V = 2;
+/** 3: face detector first, then each face read on its own crop; with focus and box per face. */
+const FACES_V = 3;
 
 const PEOPLE: PeopleSignal[] = ['eyes', 'looking', 'smile', 'natural'];
 type Choice = 'focus' | 'exposure' | 'similar' | 'people' | PeopleSignal | 'keepMine' | 'reject';
@@ -158,8 +158,8 @@ export class AutoRanker {
           const fresh = prev && prev.size === p.size && prev.mtime === p.mtime;
           const keepFaces = !!fresh && prev.facesV === FACES_V;
           const needFaces = !!model && !keepFaces;
-          // Measured before the colour layout existed: measure again (faces are kept).
-          if (!fresh || !prev.layout || needFaces) {
+          // Measured before the colour layout or subject focus existed: measure again (faces kept).
+          if (!fresh || prev.frameFocus === undefined || needFaces) {
             if (needFaces) await room();
             stats.photos++;
             const a = await this.analyze(p, needFaces ? FACE_PX : 0, stats).catch((err) => {
@@ -228,6 +228,7 @@ export class AutoRanker {
           blown: s.blown,
           hash: s.hash,
           layout: s.layout,
+          frameFocus: s.frameFocus,
           faces: s.faces,
           rejected: keepsReject(p.name),
         };
@@ -376,7 +377,7 @@ export class AutoRanker {
       const a = await analyzeJpeg(bytes, opts).catch(() => undefined);
       stats.decodeMs += a?.ms ?? 0;
       if (a && Math.max(a.sourceWidth, a.sourceHeight) >= 900) {
-        return { sharpness: a.sharpness, blown: a.blown, hash: a.hash, layout: a.layout, time, pixels: a.pixels };
+        return { sharpness: a.sharpness, blown: a.blown, hash: a.hash, layout: a.layout, frameFocus: a.frameFocus, time, pixels: a.pixels };
       }
     }
     const ext = extensionOf(p.name);
@@ -392,7 +393,7 @@ export class AutoRanker {
     stats.bytes += full.length - head.length;
     const a = await analyzeJpeg(full, opts); // hands `full` to a decoding thread (not copied)
     stats.decodeMs += a.ms ?? 0;
-    return { sharpness: a.sharpness, blown: a.blown, hash: a.hash, layout: a.layout, time, pixels: a.pixels };
+    return { sharpness: a.sharpness, blown: a.blown, hash: a.hash, layout: a.layout, frameFocus: a.frameFocus, time, pixels: a.pixels };
   }
 
   private async pickChoices(album: string, count: number): Promise<Set<Choice> | undefined> {

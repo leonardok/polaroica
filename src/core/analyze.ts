@@ -16,6 +16,105 @@ export interface Analysis {
    * same scene and framing match even when people moved; a reframe or another scene doesn't.
    */
   layout?: string;
+  /**
+   * Focus of the sharpest part of the frame, 0–100 on an absolute scale (not relative to the
+   * album), measured at ~1600 px. See focusOfFrame. Used when the photo has no faces.
+   */
+  frameFocus?: number;
+}
+
+/**
+ * Re-blur sharpness (Crete et al., 2007) of a region of a grey image: how much of its edge
+ * contrast disappears when blurred with a 9-pixel box. A sharp edge loses a lot, an already-soft
+ * one barely changes, whatever the content: a smooth face and a lace dress, both in focus, score
+ * alike (unlike edge-strength measures). Returns 0–1 (1 = sharp) and the region's mean gradient
+ * (how much edge there is to judge), or undefined for a region too small.
+ *
+ * The same algorithm runs in media/faces.js on face boxes; keep them in step.
+ */
+export function reblurSharpness(
+  g: Float32Array,
+  w: number,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+): { sharp: number; energy: number } | undefined {
+  const rw = x1 - x0;
+  const rh = y1 - y0;
+  if (rw < 16 || rh < 16) {
+    return undefined;
+  }
+  const R = 4;
+  let sIx = 0, sVx = 0, sIy = 0, sVy = 0, n = 0;
+  // Horizontal: running box blur along each row.
+  for (let y = y0; y < y1; y++) {
+    const o = y * w;
+    let sum = 0;
+    for (let k = -R; k <= R; k++) sum += g[o + Math.min(x1 - 1, Math.max(x0, x0 + k))];
+    let prevI = g[o + x0];
+    let prevB = sum / (2 * R + 1);
+    for (let x = x0 + 1; x < x1; x++) {
+      sum += g[o + Math.min(x1 - 1, x + R)] - g[o + Math.max(x0, x - R - 1)];
+      const b = sum / (2 * R + 1);
+      const dI = Math.abs(g[o + x] - prevI);
+      const dB = Math.abs(b - prevB);
+      sIx += dI;
+      sVx += Math.max(0, dI - dB);
+      prevI = g[o + x];
+      prevB = b;
+      n++;
+    }
+  }
+  // Vertical: the same down each column.
+  for (let x = x0; x < x1; x++) {
+    let sum = 0;
+    for (let k = -R; k <= R; k++) sum += g[Math.min(y1 - 1, Math.max(y0, y0 + k)) * w + x];
+    let prevI = g[y0 * w + x];
+    let prevB = sum / (2 * R + 1);
+    for (let y = y0 + 1; y < y1; y++) {
+      sum += g[Math.min(y1 - 1, y + R) * w + x] - g[Math.max(y0, y - R - 1) * w + x];
+      const b = sum / (2 * R + 1);
+      const dI = Math.abs(g[y * w + x] - prevI);
+      const dB = Math.abs(b - prevB);
+      sIy += dI;
+      sVy += Math.max(0, dI - dB);
+      prevI = g[y * w + x];
+      prevB = b;
+    }
+  }
+  const blurX = sIx ? (sIx - sVx) / sIx : 1;
+  const blurY = sIy ? (sIy - sVy) / sIy : 1;
+  return { sharp: 1 - Math.max(blurX, blurY), energy: (sIx + sIy) / (2 * (n || 1)) };
+}
+
+/** Re-blur sharpness of a face box (0–1) → 0–100. Calibrated: sharp ~0.7, 1 px blur ~0.46. */
+export const faceFocusScore = (sharp: number) => Math.round(Math.max(0, Math.min(100, ((sharp - 0.2) / 0.45) * 100)));
+
+/**
+ * Focus of the frame, 0–100: the sharpest 15% of a 16×12 grid of cells that have edges to judge
+ * (flat sky and walls say nothing). In focus ~0.7–0.9 → 90–100; 1 px of blur at 1600 px ~0.55 → 60;
+ * 2 px ~0.33 → 15.
+ */
+export function focusOfFrame(img: Rgba): number {
+  const g = gray(img);
+  const { width: w, height: h } = img;
+  const GW = 16;
+  const GH = 12;
+  const cells: number[] = [];
+  for (let cy = 0; cy < GH; cy++) {
+    for (let cx = 0; cx < GW; cx++) {
+      const r = reblurSharpness(g, w, Math.floor((cx * w) / GW), Math.floor((cy * h) / GH), Math.floor(((cx + 1) * w) / GW), Math.floor(((cy + 1) * h) / GH));
+      if (r && r.energy > 4) cells.push(r.sharp);
+    }
+  }
+  if (!cells.length) {
+    return 50;
+  }
+  cells.sort((a, b) => b - a);
+  const k = Math.max(1, Math.ceil(cells.length * 0.15));
+  const sharp = cells.slice(0, k).reduce((a, c) => a + c, 0) / k;
+  return Math.round(Math.max(0, Math.min(100, ((sharp - 0.25) / 0.5) * 100)));
 }
 
 const LAYOUT_W = 12;

@@ -28,7 +28,9 @@ can already reach.
   the sidebar show their pick count. Ratings live in the same `.sidecar/<photo>.xmp`
   (`xmp:Rating`); nothing is moved or deleted.
 - **Auto-Rank** an album (right-click it in the sidebar, the grid's **Auto-Rank…** button, or the
-  Command Palette): measures **focus** (sharpest part of each photo, relative to the album),
+  Command Palette): measures **focus** on the subject — inside the faces when there are people (so a sharp face in
+  front of a blurred background scores high, and a missed focus on the face scores low), else the
+  sharpest part of the frame — on an absolute 0–100 scale,
   **washed-out highlights** (large blown-out areas) and **similar shots** (bursts: taken within
   `vsphoto.autoRank.burstSeconds` and alike by a look-alike hash; and the same pose shot again
   within `vsphoto.autoRank.sceneSeconds` (60 s) when the framing and colours match too), then sets stars, **picks the

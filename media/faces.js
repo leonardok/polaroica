@@ -97,6 +97,62 @@
       return { area, eyes: r(eyes), looking: r(looking), smile: r(smile), natural: r(natural) };
     }
 
+    /**
+     * Focus inside a face box, 0–100, or undefined when the face is too small to judge. Re-blur
+     * sharpness: how much edge contrast a 9-pixel box blur removes (a sharp face loses a lot).
+     * Same algorithm and scale as reblurSharpness / faceFocusScore in src/core/analyze.ts.
+     */
+    function faceFocus(px, width, height, b) {
+      const x0 = Math.max(0, Math.round(b.originX));
+      const y0 = Math.max(0, Math.round(b.originY));
+      const x1 = Math.min(width, Math.round(b.originX + b.width));
+      const y1 = Math.min(height, Math.round(b.originY + b.height));
+      const rw = x1 - x0;
+      const rh = y1 - y0;
+      if (rw < 64 || rh < 64) return undefined;
+      const g = new Float32Array(rw * rh);
+      for (let y = 0; y < rh; y++) {
+        for (let x = 0; x < rw; x++) {
+          const i = ((y0 + y) * width + x0 + x) * 4;
+          g[y * rw + x] = 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
+        }
+      }
+      const R = 4;
+      let sIx = 0, sVx = 0, sIy = 0, sVy = 0;
+      for (let y = 0; y < rh; y++) {
+        const o = y * rw;
+        let sum = 0;
+        for (let k = -R; k <= R; k++) sum += g[o + Math.min(rw - 1, Math.max(0, k))];
+        let prevI = g[o], prevB = sum / (2 * R + 1);
+        for (let x = 1; x < rw; x++) {
+          sum += g[o + Math.min(rw - 1, x + R)] - g[o + Math.max(0, x - R - 1)];
+          const bl = sum / (2 * R + 1);
+          const dI = Math.abs(g[o + x] - prevI);
+          sIx += dI;
+          sVx += Math.max(0, dI - Math.abs(bl - prevB));
+          prevI = g[o + x];
+          prevB = bl;
+        }
+      }
+      for (let x = 0; x < rw; x++) {
+        let sum = 0;
+        for (let k = -R; k <= R; k++) sum += g[Math.min(rh - 1, Math.max(0, k)) * rw + x];
+        let prevI = g[x], prevB = sum / (2 * R + 1);
+        for (let y = 1; y < rh; y++) {
+          sum += g[Math.min(rh - 1, y + R) * rw + x] - g[Math.max(0, y - R - 1) * rw + x];
+          const bl = sum / (2 * R + 1);
+          const dI = Math.abs(g[y * rw + x] - prevI);
+          sIy += dI;
+          sVy += Math.max(0, dI - Math.abs(bl - prevB));
+          prevI = g[y * rw + x];
+          prevB = bl;
+        }
+      }
+      const blur = Math.max(sIx ? (sIx - sVx) / sIx : 1, sIy ? (sIy - sVy) / sIy : 1);
+      const sharp = 1 - blur;
+      return Math.round(Math.max(0, Math.min(100, ((sharp - 0.2) / 0.45) * 100)));
+    }
+
     /** Faces in a photo: upright RGBA pixels (already shrunk by the extension). */
     async function detect(data, width, height, rt, bytes) {
       const { detector, landmarker } = await load(rt, bytes);
@@ -122,7 +178,12 @@
             const r = landmarker.detect(crop);
             if (!r.faceLandmarks.length) continue;
             const area = Math.round(((b.width * b.height) / (width * height)) * 10000) / 10000;
-            out.push(metric(r.faceBlendshapes[0] || { categories: [] }, (r.facialTransformationMatrixes || [])[0], area));
+            const m = metric(r.faceBlendshapes[0] || { categories: [] }, (r.facialTransformationMatrixes || [])[0], area);
+            const f = faceFocus(px, width, height, b);
+            if (f !== undefined) m.focus = f;
+            const r4 = (v) => Math.round(v * 10000) / 10000;
+            m.box = [r4(b.originX / width), r4(b.originY / height), r4(b.width / width), r4(b.height / height)];
+            out.push(m);
           } finally {
             crop.close();
           }

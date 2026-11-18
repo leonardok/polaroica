@@ -8,7 +8,7 @@ import { pathToFileURL } from 'url';
 import { Worker } from 'worker_threads';
 import * as os from 'os';
 import { downscale, orient, Rgba, trimBars } from './image';
-import { Analysis, analyzePixels } from './analyze';
+import { Analysis, analyzePixels, focusOfFrame } from './analyze';
 
 interface Decoder {
   init(module: WebAssembly.Module): Promise<unknown> | void;
@@ -123,15 +123,15 @@ export async function analyzeHere(jpeg: Uint8Array, opts: AnalyzeOptions = {}): 
   const t0 = Date.now();
   const ab = jpeg.buffer.slice(jpeg.byteOffset, jpeg.byteOffset + jpeg.byteLength) as ArrayBuffer;
   const img = await decode.default(ab, { preserveOrientation: false });
-  // Shrinking the full decode is the slow part (as slow as decoding), so do it once: to the face
-  // model's size when it's wanted, and the 1024 px measuring copy from that small image.
-  const big = downscale(img, Math.max(1024, opts.facePx ?? 0));
-  const a = analyzePixels(downscale(big, 1024));
+  // Shrinking the full decode is the slow part (as slow as decoding), so do it once, to 1600 px
+  // upright: focus is measured there (and on faces, by the face model, at the same size); the
+  // 1024 px copy for the other measurements is made from it.
+  const big = orient(downscale(img, opts.facePx ?? 1600), opts.orientation);
+  const a = { ...analyzePixels(downscale(big, 1024)), frameFocus: focusOfFrame(big) };
   let pixels: Rgba | undefined;
   if (opts.facePx) {
-    const p = orient(big, opts.orientation);
     // Own copy: small, and transferable to another thread without dragging the full decode along.
-    pixels = { data: new Uint8Array(p.data), width: p.width, height: p.height };
+    pixels = { data: new Uint8Array(big.data), width: big.width, height: big.height };
   }
   return { ...a, sourceWidth: img.width, sourceHeight: img.height, pixels, ms: Date.now() - t0 };
 }
