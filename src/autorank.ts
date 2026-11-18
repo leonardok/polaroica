@@ -210,16 +210,31 @@ export class AutoRanker {
       return;
     }
 
+    // Rejects that stay rejected: yours always, and every reject when Auto-Rank isn't asked to
+    // reject (it only adds rejects then, never removes them). Undo restores everything.
+    const cull = await this.edits.cullingIn(folder.fsPath);
+    const keepsReject = (name: string) => {
+      const c = cull.get(name);
+      return c?.flag === 'reject' && (!c.auto || !opts.reject);
+    };
     const inputs: RankInput[] = photos
       .filter((p) => stored.has(p.name))
       .map((p) => {
         const s = stored.get(p.name)!;
-        return { name: p.name, time: s.time, sharpness: s.sharpness, blown: s.blown, hash: s.hash, layout: s.layout, faces: s.faces };
+        return {
+          name: p.name,
+          time: s.time,
+          sharpness: s.sharpness,
+          blown: s.blown,
+          hash: s.hash,
+          layout: s.layout,
+          faces: s.faces,
+          rejected: keepsReject(p.name),
+        };
       });
     const results = rankAlbum(inputs, opts);
 
     // Write ratings, keeping what you rated yourself.
-    const cull = await this.edits.cullingIn(folder.fsPath);
     const at = new Date().toISOString();
     const undo: Array<{ photo: vscode.Uri; before: Sidecar }> = [];
     let written = 0;
@@ -240,7 +255,7 @@ export class AutoRanker {
           await this.edits.write(photo, {
             ...before,
             rating: r.stars,
-            flag: r.flag,
+            flag: keepsReject(r.name) ? 'reject' : r.flag,
             auto: { scores: r.scores, groupAvg: r.groupAvg, group: r.group, notes: r.notes, reason: r.reason, at },
           });
           written++;

@@ -21,6 +21,8 @@ export interface RankInput extends Analysis {
   time?: number;
   /** Faces found ([] = none); undefined when the face model wasn't used. */
   faces?: FaceMetric[];
+  /** Rejected and staying so: never chosen as the best (pick) of its group. */
+  rejected?: boolean;
 }
 
 export type PeopleSignal = 'eyes' | 'looking' | 'smile' | 'natural';
@@ -190,12 +192,14 @@ export function rankAlbum(items: RankInput[], opts: RankOptions): RankResult[] {
       }
     }
     const ranked = [...g].sort((a, b) => quality(b.name) - quality(a.name));
-    const best = ranked[0];
-    const bestQ = quality(best.name);
+    // The best shot you haven't rejected (if you rejected them all, none is picked).
+    const best: RankInput | undefined = ranked.find((p) => !p.rejected);
+    const top = best ?? ranked[0];
+    const bestQ = quality(top.name);
     const bestStars = starsFor(bestQ);
     const avg: Record<string, number> = {};
     if (g.length > 1) {
-      for (const k of Object.keys(base.get(best.name)!)) {
+      for (const k of Object.keys(base.get(top.name)!)) {
         avg[k] = Math.round(g.reduce((a, p) => a + base.get(p.name)![k], 0) / g.length);
       }
       if (opts.similar) avg.similar = Math.round(g.reduce((a, p) => a + (100 * quality(p.name)) / (bestQ || 1), 0) / g.length);
@@ -215,7 +219,7 @@ export function rankAlbum(items: RankInput[], opts: RankOptions): RankResult[] {
       if (notes.includes('blurry') || notes.includes('washed out')) stars = Math.min(stars, 2);
       else if (notes.includes('eyes closed')) stars = Math.min(stars, 3);
       let flag: 'pick' | 'reject' | undefined;
-      if (g.length > 1 && isBest && !notes.length) flag = 'pick';
+      if (g.length > 1 && isBest && !notes.length && !p.rejected) flag = 'pick';
       if (opts.reject && (notes.length || (g.length > 1 && !isBest))) flag = 'reject';
       out.push({
         name: p.name,

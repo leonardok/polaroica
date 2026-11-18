@@ -145,3 +145,18 @@ test('scenes: the same pose shot again within a minute stacks; a reframe or a bu
   const strict = groupSimilar(items, 2, 0).map((g) => g.map((x) => x.name.slice(5, 8)));
   assert.deepEqual(strict, [['858', '859'], ['861'], ['863'], ['870', '871'], ['880']]);
 });
+
+test('rejects you keep are never the best of a group; the best kept shot is picked instead', () => {
+  const t0 = Date.UTC(2023, 11, 24, 22, 0, 0);
+  const p = (name: string, s: number, sharpness: number, rejected = false): RankInput => ({ name, time: t0 + s * 1000, sharpness, blown: 0, hash: hashWith(0), rejected });
+  const opts = { focus: true, exposure: true, similar: true, reject: false, burstSeconds: 2 };
+  const res = rankAlbum([p('a.jpg', 0, 50, true), p('b.jpg', 1, 30), p('c.jpg', 2, 10)], opts);
+  const by = (n: string) => res.find((r) => r.name === n)!;
+  assert.equal(by('a.jpg').group?.best, false, 'the sharpest one is rejected, so not the best');
+  assert.equal(by('a.jpg').flag, undefined);
+  assert.equal(by('b.jpg').group?.best, true);
+  assert.equal(by('b.jpg').flag, 'pick');
+
+  const all = rankAlbum([p('a.jpg', 0, 50, true), p('b.jpg', 1, 30, true)], opts);
+  assert.ok(all.every((r) => !r.group?.best && r.flag !== 'pick'), 'all rejected: nothing picked');
+});
