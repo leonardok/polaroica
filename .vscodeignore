@@ -1,0 +1,7 @@
+src/**
+out/test/**
+docs/**
+node_modules/**
+.vscode/**
+**/*.map
+tsconfig.json
