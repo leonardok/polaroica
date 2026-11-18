@@ -5,3 +5,4 @@ node_modules/**
 .vscode/**
 **/*.map
 tsconfig.json
+.gitignore
