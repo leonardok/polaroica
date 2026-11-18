@@ -489,7 +489,7 @@ void main() {
       },
     });
     kInput.style.setProperty('--track', 'linear-gradient(90deg, #4a7fd1, #e8e8e8 45%, #d9a54a)');
-    const kRow = h('div', { class: 'adj-row' }, h('label', { for: 'adj-kelvin' }, 'Temperature'), kInput, kValue);
+    const kRow = h('div', { class: 'adj-row' }, h('label', { for: 'adj-kelvin', title: 'Temperature (white balance)' }, 'Temp'), kInput, kValue);
     const fmtK = (k) => `${k.toLocaleString('en-US')} K`;
     function paintKelvin(moveThumb) {
       const k = hasKelvin(edits) ? edits.kelvin : ref ? ref.kelvin : 0;

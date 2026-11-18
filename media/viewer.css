@@ -14,8 +14,7 @@ body {
   height: 100vh;
 }
 .details {
-  flex: 1 0 240px;
-  max-width: 300px;
+  flex: 0 0 300px;
 }
 /* Side by side: the tab is exactly the window's height and never scrolls as a whole; the photo
    stays put and only the side panel scrolls (its own scrollbar). On narrow tabs the panel wraps
@@ -43,13 +42,9 @@ body {
   display: flex;
   gap: 2px;
 }
-.zoom .btn {
-  height: 24px;
-  font-size: 12px;
-  background: none;
-}
-.zoom .btn.on {
+.zoom .icon-btn.on {
   background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
 }
 
 .stage {
@@ -206,11 +201,7 @@ body {
   opacity: 0.4;
   cursor: default;
 }
-.btn.before {
-  height: 24px;
-  font-size: 12px;
-}
-.btn.before.on {
+.icon-btn.before.on {
   background: var(--vscode-button-background);
   color: var(--vscode-button-foreground);
 }
@@ -254,17 +245,28 @@ body {
   display: inline;
 }
 
+/* One grid for the whole panel: labels and values only take the room they need, the sliders get
+   the rest, and every slider lines up with the others (LIGHT and COLOR alike). */
 .adjust {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
+  column-gap: 8px;
   margin: 0 -16px -16px;
 }
 .adj-block {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  row-gap: 8px;
   padding: 10px 16px 12px;
   border-bottom: 1px solid var(--line);
+}
+.adj-block > * {
+  grid-column: 1 / -1;
+}
+/* Full-width pieces (titles, histogram, buttons, notes) must not widen the label or value column. */
+.adj-block > :not(.adj-row) {
+  contain: inline-size;
 }
 .adj-block:last-child {
   border-bottom: 0;
@@ -282,11 +284,10 @@ body {
   height: 76px;
   border-radius: 3px;
 }
-.adj-row {
+.adj-block > .adj-row {
   display: grid;
-  grid-template-columns: 78px minmax(0, 1fr) 56px;
+  grid-template-columns: subgrid;
   align-items: center;
-  gap: 8px;
   font-size: 12px;
 }
 .adj-value {

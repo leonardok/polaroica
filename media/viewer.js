@@ -77,11 +77,11 @@
       renderer.bypass = false;
     }
 
-    const fitBtn = h('button', { class: 'btn' + (zoom === 'fit' ? ' on' : ''), 'aria-pressed': String(zoom === 'fit'), onclick: () => setZoom('fit') }, 'Fit');
-    const fullBtn = h('button', { class: 'btn' + (zoom === 'full' ? ' on' : ''), 'aria-pressed': String(zoom === 'full'), onclick: () => setZoom('full') }, '100%');
+    const fitBtn = h('button', { class: 'icon-btn' + (zoom === 'fit' ? ' on' : ''), 'aria-label': 'Fit', title: 'Fit the photo in the window', 'aria-pressed': String(zoom === 'fit'), onclick: () => setZoom('fit') }, icon('fit'));
+    const fullBtn = h('button', { class: 'icon-btn' + (zoom === 'full' ? ' on' : ''), 'aria-label': '100%', title: '100% (one photo pixel per screen pixel)', 'aria-pressed': String(zoom === 'full'), onclick: () => setZoom('full') }, icon('actual'));
     undoBtn = h('button', { class: 'icon-btn', 'aria-label': 'Undo', title: 'Undo (Ctrl+Z)', onclick: doUndo }, icon('undo'));
     redoBtn = h('button', { class: 'icon-btn', 'aria-label': 'Redo', title: 'Redo (Ctrl+Shift+Z)', onclick: doRedo }, icon('redo'));
-    beforeBtn = h('button', { class: 'btn before', 'aria-pressed': 'false', title: 'Show the original (hold \\)', onclick: () => setBefore(!(renderer && renderer.bypass)) }, 'Before / After');
+    beforeBtn = h('button', { class: 'icon-btn before', 'aria-label': 'Before / After', 'aria-pressed': 'false', title: 'Before / After: show the original (hold \\)', onclick: () => setBefore(!(renderer && renderer.bypass)) }, icon('compare'));
 
     noteEl = h('div', { class: 'loading', role: 'status' }, 'Loading photo…');
     frameEl = h('div', {
@@ -441,7 +441,7 @@
       frameEl.classList.toggle('fit', z === 'fit');
       frameEl.classList.toggle('full', z !== 'fit');
     }
-    document.querySelectorAll('.zoom .btn').forEach((b, i) => {
+    document.querySelectorAll('.zoom button').forEach((b, i) => {
       const on = i === 0 ? z === 'fit' : z === 'full';
       b.classList.toggle('on', on);
       b.setAttribute('aria-pressed', String(on));

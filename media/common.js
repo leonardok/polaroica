@@ -43,6 +43,12 @@
     trash: 'M2.5 4h11M6 4V2.5h4V4M4 4l.7 9.5h6.6L12 4M6.5 6.5v5M9.5 6.5v5',
     export: 'M8 10V2M5 5l3-3 3 3M3 9v4.5h10V9',
     filter: 'M2.5 3.5h11L9.5 8.5v4l-3 1.5V8.5z',
+    // A frame split in two, the right half hatched: original | edited.
+    compare: 'M2.5 3.5h11v9h-11zM8 2v12M9.5 7.5l2-2M9.5 10.5l4-4',
+    // Corners around a picture: the whole photo in the window.
+    fit: 'M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10M5.5 5.5h5v5h-5z',
+    // A magnifier with a "1" in it: one photo pixel per screen pixel.
+    actual: 'M7 2.5a4.5 4.5 0 1 1 0 9a4.5 4.5 0 1 1 0-9M10.3 10.3l3.2 3.2M6 5.8l1.2-.8v4',
   };
   function icon(name, size) {
     const s = document.createElementNS(SVG_NS, 'svg');
