@@ -1,4 +1,3 @@
-import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { Analysis } from './core/analyze';
@@ -10,9 +9,18 @@ import { FaceMetric, PeopleSignal, rankAlbum, RankInput, RankOptions } from './c
 import { faceModels, FaceModels } from './faceModel';
 import { emptySidecar, Sidecar } from './core/xmp';
 import { EditStore } from './edits';
-import { mapLimit, Photo, PhotoStore, readHead, readRange } from './photoStore';
+import { mapLimit, Photo, PhotoStore, readHead, readRange, readWhole } from './photoStore';
 
 const CHOICES_KEY = 'vsphoto.autoRankChoices';
+
+/** Where an Auto-Rank run spends its time (for the log). */
+interface RunStats {
+  readMs: number;
+  bytes: number;
+  decodeMs: number;
+  facesMs: number;
+  photos: number;
+}
 const ANALYSIS_KEY = 'autorank-analysis-v2';
 
 interface Stored extends Analysis {
@@ -107,6 +115,8 @@ export class AutoRanker {
         // takes one photo at a time, behind it. A decode never waits for faces; only the number
         // of decoded photos waiting for faces is capped (each holds a 1600 px image, ~7 MB).
         const threads = busyThreads();
+        const started = Date.now();
+        const stats: RunStats = { readMs: 0, bytes: 0, decodeMs: 0, facesMs: 0, photos: 0 };
         const faceJobs: Promise<void>[] = [];
         let waiting = 0;
         const wakeups: Array<() => void> = [];
@@ -122,7 +132,9 @@ export class AutoRanker {
           try {
             if (token.isCancellationRequested) return;
             faceRuns++;
+            const tf = Date.now();
             const r = await this.faces(folder, pixels, model!).catch((err) => ({ faces: undefined, error: String(err) }));
+            stats.facesMs += Date.now() - tf;
             if (r.faces) {
               stored.set(p.name, { ...base, faces: r.faces, facesV: FACES_V });
               this.log(`Auto-Rank: ${p.name}: ${r.faces.length} face(s) ${JSON.stringify(r.faces)}`);
@@ -136,7 +148,9 @@ export class AutoRanker {
             finish();
           }
         };
-        await mapLimit(photos, threads + 2, async (p) => {
+        // Many files in flight: on a share most of them are waiting on the network, so the
+        // decoding threads always have the next photo ready. (A few hundred MB at most.)
+        await mapLimit(photos, Math.max(16, threads * 3), async (p) => {
           if (token.isCancellationRequested) {
             return;
           }
@@ -147,7 +161,8 @@ export class AutoRanker {
           // Measured before the colour layout existed: measure again (faces are kept).
           if (!fresh || !prev.layout || needFaces) {
             if (needFaces) await room();
-            const a = await this.analyze(p, needFaces ? FACE_PX : 0).catch((err) => {
+            stats.photos++;
+            const a = await this.analyze(p, needFaces ? FACE_PX : 0, stats).catch((err) => {
               this.log(`Auto-Rank: could not read ${p.name}: ${err instanceof Error ? err.message : String(err)}`);
               return undefined;
             });
@@ -165,6 +180,19 @@ export class AutoRanker {
           finish();
         });
         await Promise.all(faceJobs);
+        if (stats.photos) {
+          const wall = (Date.now() - started) / 1000;
+          const mb = stats.bytes / 1048576;
+          const per = (ms: number) => `${Math.round(ms / stats.photos)} ms/photo`;
+          this.log(
+            `Auto-Rank ${path.basename(folder.fsPath)}: measured ${stats.photos} photos in ${wall.toFixed(1)} s ` +
+              `(${(stats.photos / wall).toFixed(1)} photos/s, ${threads} threads). ` +
+              `Read ${mb.toFixed(0)} MB at ${(mb / wall).toFixed(0)} MB/s overall; ` +
+              `per photo: reading ${per(stats.readMs)} (many at once), decoding ${per(stats.decodeMs)} of CPU` +
+              (faceRuns ? `, faces ${Math.round(stats.facesMs / faceRuns)} ms/photo` : '') +
+              '.',
+          );
+        }
         if (faceFails) {
           const ok = faceRuns - faceFails;
           void vscode.window
@@ -311,20 +339,27 @@ export class AutoRanker {
   }
 
   /** Bytes good enough to measure: the camera's built-in preview, else the whole file. */
-  private async analyze(p: Photo, facePx: number): Promise<(Analysis & { time?: number; pixels?: Rgba }) | undefined> {
+  private async analyze(p: Photo, facePx: number, stats: RunStats): Promise<(Analysis & { time?: number; pixels?: Rgba }) | undefined> {
+    let t = Date.now();
     const head = await readHead(p.uri.fsPath, 512 * 1024).catch(() => undefined);
+    stats.readMs += Date.now() - t;
     if (!head) {
       return undefined;
     }
+    stats.bytes += head.length;
     const exif = readExif(head);
     const time = captureTime(exif);
     const opts = { facePx: facePx || undefined, orientation: exif?.orientation };
     const ranges = isRaw(p.name) ? embeddedPreviews(head) : mpfPreviews(head);
     for (const r of ranges) {
       if (r.length > 8 * 1024 * 1024 || r.offset + r.length > p.size) continue;
+      t = Date.now();
       const bytes = r.offset + r.length <= head.length ? head.subarray(r.offset, r.offset + r.length) : await readRange(p.uri.fsPath, r.offset, r.length).catch(() => undefined);
+      stats.readMs += Date.now() - t;
       if (!bytes || bytes.length !== r.length || !isBrowserJpeg(bytes)) continue;
+      if (bytes.buffer !== head.buffer) stats.bytes += bytes.length;
       const a = await analyzeJpeg(bytes, opts).catch(() => undefined);
+      stats.decodeMs += a?.ms ?? 0;
       if (a && Math.max(a.sourceWidth, a.sourceHeight) >= 900) {
         return { sharpness: a.sharpness, blown: a.blown, hash: a.hash, layout: a.layout, time, pixels: a.pixels };
       }
@@ -333,11 +368,15 @@ export class AutoRanker {
     if (isRaw(p.name) || !['jpg', 'jpeg', 'jpe', 'jfif'].includes(ext) || p.size > 80 * 1024 * 1024) {
       return undefined;
     }
-    const full = await fs.promises.readFile(p.uri.fsPath).catch(() => undefined);
+    t = Date.now();
+    const full = await readWhole(p.uri.fsPath, p.size, head).catch(() => undefined);
+    stats.readMs += Date.now() - t;
     if (!full) {
       return undefined;
     }
-    const a = await analyzeJpeg(full, opts);
+    stats.bytes += full.length - head.length;
+    const a = await analyzeJpeg(full, opts); // hands `full` to a decoding thread (not copied)
+    stats.decodeMs += a.ms ?? 0;
     return { sharpness: a.sharpness, blown: a.blown, hash: a.hash, layout: a.layout, time, pixels: a.pixels };
   }
 

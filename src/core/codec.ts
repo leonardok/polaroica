@@ -115,11 +115,12 @@ export interface AnalyzeOptions {
   orientation?: number;
 }
 
-export type Analyzed = Analysis & { sourceWidth: number; sourceHeight: number; pixels?: Rgba };
+export type Analyzed = Analysis & { sourceWidth: number; sourceHeight: number; pixels?: Rgba; /** CPU time of the decode + measuring, ms. */ ms?: number };
 
 /** Decodes a JPEG and measures it for Auto-Rank at ~1024 px. In this thread. */
 export async function analyzeHere(jpeg: Uint8Array, opts: AnalyzeOptions = {}): Promise<Analyzed> {
   const { decode } = await codecs();
+  const t0 = Date.now();
   const ab = jpeg.buffer.slice(jpeg.byteOffset, jpeg.byteOffset + jpeg.byteLength) as ArrayBuffer;
   const img = await decode.default(ab, { preserveOrientation: false });
   // Shrinking the full decode is the slow part (as slow as decoding), so do it once: to the face
@@ -132,7 +133,7 @@ export async function analyzeHere(jpeg: Uint8Array, opts: AnalyzeOptions = {}): 
     // Own copy: small, and transferable to another thread without dragging the full decode along.
     pixels = { data: new Uint8Array(p.data), width: p.width, height: p.height };
   }
-  return { ...a, sourceWidth: img.width, sourceHeight: img.height, pixels };
+  return { ...a, sourceWidth: img.width, sourceHeight: img.height, pixels, ms: Date.now() - t0 };
 }
 
 // ---- worker pool ------------------------------------------------------------------------
@@ -222,9 +223,11 @@ class Pool {
       slot.busy = true;
       slot.w.ref();
       this.pending.set(id, { kind: job.kind, resolve: job.resolve, reject: job.reject, worker: slot });
-      // Copy into a fresh buffer we can hand over without copying again.
-      const bytes = new Uint8Array(job.jpeg);
-      slot.w.postMessage({ id, kind: job.kind, jpeg: bytes, opts: job.opts }, [bytes.buffer]);
+      // Hand the bytes over without copying when the caller gave us a buffer of its own (a whole
+      // file read for Auto-Rank); otherwise copy (a slice of a bigger buffer the caller keeps).
+      const own = job.kind === 'analyze' && job.jpeg.byteOffset === 0 && job.jpeg.byteLength === job.jpeg.buffer.byteLength;
+      const bytes = own ? job.jpeg : new Uint8Array(job.jpeg);
+      slot.w.postMessage({ id, kind: job.kind, jpeg: bytes, opts: job.opts }, [bytes.buffer as ArrayBuffer]);
     }
   }
 

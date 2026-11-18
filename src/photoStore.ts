@@ -222,6 +222,44 @@ export async function readRange(fsPath: string, offset: number, length: number):
   }
 }
 
+/**
+ * A whole file, in big pieces read in parallel (4 MB, 4 at a time) into one buffer the caller
+ * owns: on a network share each read is a round trip, so few large overlapping reads are much
+ * faster than Node's default of many small sequential ones. `head` (the start of the file,
+ * already read) is reused.
+ */
+export async function readWhole(fsPath: string, size: number, head?: Uint8Array): Promise<Uint8Array> {
+  const out = new Uint8Array(size);
+  let start = 0;
+  if (head) {
+    start = Math.min(head.length, size);
+    out.set(head.subarray(0, start));
+  }
+  const handle = await fs.promises.open(fsPath, 'r');
+  try {
+    const CHUNK = 4 * 1024 * 1024;
+    const offsets: number[] = [];
+    for (let o = start; o < size; o += CHUNK) offsets.push(o);
+    let got = start;
+    await mapLimit(offsets, 4, async (o) => {
+      const len = Math.min(CHUNK, size - o);
+      let done = 0;
+      while (done < len) {
+        const { bytesRead } = await handle.read(out, o + done, len - done, o + done);
+        if (!bytesRead) break;
+        done += bytesRead;
+      }
+      got += done;
+    });
+    if (got < size) {
+      throw new Error(`file changed while reading (${got} of ${size} bytes)`);
+    }
+    return out;
+  } finally {
+    await handle.close();
+  }
+}
+
 export async function isReachable(fsPath: string): Promise<boolean> {
   try {
     return (await fs.promises.stat(fsPath)).isDirectory();
