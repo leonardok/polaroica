@@ -41,8 +41,8 @@ can already reach.
   **Smiling** and **Natural expression**): face models (MediaPipe face detector + Face Landmarker,
   Apache-2.0) find every face and score each one's expression, so in a burst the frame where nobody blinks and everyone faces the
   camera wins, and a photo where someone's eyes are closed gets at most 3 stars. Group shots count
-  the worst blink most; small background faces are ignored. The models (4.8 MB) are downloaded once,
-  after asking, into the extension's storage; they run on your computer in the grid tab and your
+  the worst blink most; small background faces are ignored. The models (4.8 MB) ship with the
+  extension ([`models/`](models), Apache-2.0); they run on your computer in the grid tab and your
   photos are never uploaded. Problems are logged in **Photo Library: Show Log**.
 - **Right-click** a photo (grid or photo tab) for **Move to…** and **Reveal in OS**.
 - **Move**: *Move to…* from the grid, a photo tab, or a folder's context menu walks your libraries

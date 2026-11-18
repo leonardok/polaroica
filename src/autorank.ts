@@ -7,7 +7,7 @@ import { analyzeJpeg, codecThreads } from './core/codec';
 import { captureTime, embeddedPreviews, isBrowserJpeg, mpfPreviews, readExif } from './core/exif';
 import { extensionOf, isRaw } from './core/images';
 import { FaceMetric, PeopleSignal, rankAlbum, RankInput, RankOptions } from './core/rank';
-import { ensureFaceModel, FaceModels } from './faceModel';
+import { faceModels, FaceModels } from './faceModel';
 import { emptySidecar, Sidecar } from './core/xmp';
 import { EditStore } from './edits';
 import { mapLimit, Photo, PhotoStore, readHead, readRange } from './photoStore';
@@ -76,9 +76,9 @@ export class AutoRanker {
     };
     let model: FaceModels | undefined;
     if (opts.people!.length) {
-      model = await ensureFaceModel(this.context);
+      model = faceModels(this.context);
       if (!model) {
-        const go = await vscode.window.showWarningMessage('Rank without the people options?', { modal: true, detail: 'Without the face model Auto-Rank can’t judge eyes, gaze or expressions.' }, 'Rank Without');
+        const go = await vscode.window.showWarningMessage('Rank without the people options?', { modal: true, detail: 'The face models are missing from this installation of the extension; reinstalling it should restore them.' }, 'Rank Without');
         if (go !== 'Rank Without') {
           return;
         }
@@ -315,7 +315,7 @@ export class AutoRanker {
       { id: 'focus', label: '$(eye) Focus', detail: 'Blurry or out-of-focus photos rank lower' },
       { id: 'exposure', label: '$(lightbulb) Washed-out highlights', detail: 'Photos with blown-out white areas rank lower' },
       { id: 'similar', label: '$(layers) Similar shots', detail: 'Group bursts and near-duplicates; the best of each group is picked' },
-      { id: 'people', label: '$(person) People', detail: 'Judge faces with a face model that runs on this computer (one-time 4.8 MB download)' },
+      { id: 'people', label: '$(person) People', detail: 'Judge faces with face models that run on this computer; photos are never uploaded' },
       { id: 'eyes', label: '$(blank)$(blank) Eyes open', description: 'nobody blinking' },
       { id: 'looking', label: '$(blank)$(blank) Looking at the camera', description: 'face and eyes towards the lens' },
       { id: 'smile', label: '$(blank)$(blank) Smiling' },
