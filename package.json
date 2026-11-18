@@ -4,6 +4,7 @@
   "description": "Browse and organize photo libraries \u2014 local folders and SMB network shares \u2014 inside VS Code.",
   "version": "0.2.0",
   "publisher": "leonardok",
+  "license": "GPL-3.0-or-later",
   "repository": {
     "type": "git",
     "url": "https://github.com/leonardok/vsphoto"

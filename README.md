@@ -97,3 +97,11 @@ npx @vscode/vsce package
   editor doesn't accept drops from webviews, use *Move to…*.
 - File-change watching may not fire for every SMB server; use **Refresh** in the view title or
   grid toolbar.
+
+## License
+
+Copyright (C) 2026 leonardok
+
+This program is free software: you can redistribute it and/or modify it under the terms of the
+GNU General Public License as published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version. See [`LICENSE`](LICENSE).
