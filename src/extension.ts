@@ -28,7 +28,13 @@ export function activate(context: vscode.ExtensionContext): void {
   const mover = new Mover(context, libraries, store, edits);
   const grids = new GridPanels(context, libraries, store, mover, thumbs, edits);
   const viewers = new PhotoViewers(context, libraries, store, mover, thumbs, edits);
-  const ranker = new AutoRanker(context, store, edits, (folder, summary) => grids.autoRankDone(folder, summary));
+  const ranker = new AutoRanker(
+    context,
+    store,
+    edits,
+    (folder, summary) => grids.autoRankDone(folder, summary),
+    (folder, data, mime, model) => grids.detectFaces(folder, data, mime, model),
+  );
   grids.setHost({
     openPhoto: (folder, name, sort) => viewers.open(folder, name, sort),
     autoRank: (folder) => void ranker.run(folder),

@@ -1,8 +1,8 @@
 {
   "name": "vsphoto",
   "displayName": "Photo Library",
-  "description": "Browse and organize photo libraries \u2014 local folders and SMB network shares \u2014 inside VS Code.",
-  "version": "0.5.0",
+  "description": "Browse and organize photo libraries — local folders and SMB network shares — inside VS Code.",
+  "version": "0.6.0",
   "publisher": "leonardok",
   "license": "GPL-3.0-or-later",
   "repository": {
@@ -55,7 +55,7 @@
     "commands": [
       {
         "command": "vsphoto.addLibrary",
-        "title": "Add Library\u2026",
+        "title": "Add Library…",
         "category": "Photo Library",
         "icon": "$(add)"
       },
@@ -77,12 +77,12 @@
       },
       {
         "command": "vsphoto.moveTo",
-        "title": "Move to\u2026",
+        "title": "Move to…",
         "category": "Photo Library"
       },
       {
         "command": "vsphoto.newFolder",
-        "title": "New Folder\u2026",
+        "title": "New Folder…",
         "category": "Photo Library"
       },
       {
@@ -102,12 +102,12 @@
       },
       {
         "command": "vsphoto.thumbnailProgress",
-        "title": "Thumbnail Progress\u2026",
+        "title": "Thumbnail Progress…",
         "category": "Photo Library"
       },
       {
         "command": "vsphoto.photoMoveTo",
-        "title": "Move to\u2026",
+        "title": "Move to…",
         "category": "Photo Library"
       },
       {
@@ -117,7 +117,7 @@
       },
       {
         "command": "vsphoto.autoRank",
-        "title": "Auto-Rank Album\u2026",
+        "title": "Auto-Rank Album…",
         "category": "Photo Library",
         "icon": "$(sparkle)"
       }
@@ -279,6 +279,7 @@
   },
   "dependencies": {
     "@jsquash/jpeg": "1.6.0",
-    "@jsquash/webp": "1.5.0"
+    "@jsquash/webp": "1.5.0",
+    "@mediapipe/tasks-vision": "1.2.3"
   }
 }

@@ -615,6 +615,12 @@
       case 'autoRankDone':
         showBanner(m.summary);
         break;
+      case 'faces':
+        window.vsphoto.faces
+          .detect(window.vsphoto.bytes(m.data), m.mime, m.runtime)
+          .then((faces) => post({ type: 'facesResult', id: m.id, faces }))
+          .catch((err) => post({ type: 'facesResult', id: m.id, error: String((err && err.message) || err) }));
+        break;
       case 'edited': {
         const tile = tileByName.get(m.name);
         tile?.classList.toggle('edited', !!m.edited);

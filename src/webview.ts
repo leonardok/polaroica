@@ -29,14 +29,16 @@ function asset(extensionUri: vscode.Uri, file: string): string {
 export function webviewHtml(
   webview: vscode.Webview,
   extensionUri: vscode.Uri,
-  opts: { title: string; script: string | string[]; style: string; body: string },
+  opts: { title: string; script: string | string[]; style: string; body: string; faces?: boolean },
 ): string {
   const n = nonce();
   const csp = [
     "default-src 'none'",
     `img-src ${webview.cspSource} data: blob:`,
     `style-src 'nonce-${n}'`,
-    `script-src 'nonce-${n}'`,
+    // The face model (MediaPipe, WebAssembly) loads its own scripts and files from the extension.
+    opts.faces ? `script-src 'nonce-${n}' ${webview.cspSource} 'wasm-unsafe-eval'` : `script-src 'nonce-${n}'`,
+    ...(opts.faces ? [`connect-src ${webview.cspSource}`] : []),
   ].join('; ');
   // A literal "</" inside inlined code would end the tag early.
   const safe = (s: string) => s.replace(/<\/(script|style)/gi, '<\\/$1');
@@ -63,8 +65,13 @@ export function escapeHtml(s: string): string {
 }
 
 /** Webview roots: the extension's media plus every library, so photos can be shown. */
-export function localRoots(extensionUri: vscode.Uri): vscode.Uri[] {
-  return [vscode.Uri.joinPath(extensionUri, 'media'), ...(vscode.workspace.workspaceFolders ?? []).map((f) => f.uri)];
+export function localRoots(extensionUri: vscode.Uri, extra: vscode.Uri[] = []): vscode.Uri[] {
+  return [
+    vscode.Uri.joinPath(extensionUri, 'media'),
+    vscode.Uri.joinPath(extensionUri, 'node_modules', '@mediapipe', 'tasks-vision'),
+    ...extra,
+    ...(vscode.workspace.workspaceFolders ?? []).map((f) => f.uri),
+  ];
 }
 
 /** postMessage with binary data made safe for the webview (see toWire). */

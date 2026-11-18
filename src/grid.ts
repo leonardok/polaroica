@@ -9,6 +9,8 @@ import { Thumb } from './core/cache';
 import { ThumbJob, ThumbService } from './thumbs';
 import { EditStore } from './edits';
 import { fromWire, localRoots, post, webviewHtml } from './webview';
+import { modelsDir } from './faceModel';
+import { FaceMetric } from './core/rank';
 
 type FromGrid =
   | { type: 'ready' }
@@ -22,6 +24,7 @@ type FromGrid =
   | { type: 'autoRank' }
   | { type: 'undoAutoRank' }
   | { type: 'makeBest'; name: string }
+  | { type: 'facesResult'; id: number; faces?: FaceMetric[]; error?: string }
   | { type: 'onscreen'; names: string[] }
   | { type: 'decoded'; id: number; data?: unknown; w?: number; h?: number }
   | { type: 'refresh' };
@@ -73,7 +76,7 @@ export class GridPanels implements vscode.Disposable {
         : []),
       vscode.workspace.onDidChangeWorkspaceFolders(() => {
         for (const p of this.panels.values()) {
-          p.panel.webview.options = { ...p.panel.webview.options, localResourceRoots: localRoots(context.extensionUri) };
+          p.panel.webview.options = { ...p.panel.webview.options, localResourceRoots: localRoots(context.extensionUri, [modelsDir(context)]) };
         }
       }),
     );
@@ -93,7 +96,7 @@ export class GridPanels implements vscode.Disposable {
       'vsphoto.grid',
       path.basename(folder.fsPath) || folder.fsPath,
       { viewColumn: vscode.ViewColumn.Active, preserveFocus: false },
-      { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: localRoots(this.context.extensionUri) },
+      { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: localRoots(this.context.extensionUri, [modelsDir(this.context)]) },
     );
     panel.iconPath = {
       light: vscode.Uri.joinPath(this.context.extensionUri, 'media', 'grid-light.svg'),
@@ -129,6 +132,15 @@ export class GridPanels implements vscode.Disposable {
       const names = grid.selected.includes(name) ? grid.selected : [name];
       await this.mover.moveWithPicker(names.map(uriOf));
     }
+  }
+
+  /** Face metrics for a photo, via the grid tab of its folder (opened if needed). */
+  async detectFaces(folder: vscode.Uri, data: Uint8Array, mime: string, modelFile: string): Promise<FaceMetric[] | undefined> {
+    if (!this.panels.get(folder.fsPath)) {
+      this.open(folder);
+    }
+    const grid = this.panels.get(folder.fsPath);
+    return grid?.detectFaces(data, mime, modelFile);
   }
 
   /** Tell an open grid of this folder that Auto-Rank finished (banner with Undo). */
@@ -202,6 +214,10 @@ class GridPanel {
   readonly job: ThumbJob;
   private nextId = 1;
   private readonly pending = new Map<number, (t: Thumb | undefined) => void>();
+  private readonly pendingFaces = new Map<number, (f: FaceMetric[] | undefined) => void>();
+  private markReady!: () => void;
+  /** Resolves once the page's script listens for messages. */
+  private readonly ready = new Promise<void>((r) => (this.markReady = r));
 
   constructor(
     readonly panel: vscode.WebviewPanel,
@@ -211,9 +227,10 @@ class GridPanel {
     const { context } = owner.ctx;
     panel.webview.html = webviewHtml(panel.webview, context.extensionUri, {
       title: path.basename(folder.fsPath),
-      script: 'grid.js',
+      script: ['faces.js', 'grid.js'],
       style: 'grid.css',
       body: '<div id="app"></div>',
+      faces: true,
     });
     panel.webview.onDidReceiveMessage((m: FromGrid) => this.onMessage(m));
     this.job = owner.ctx.thumbs.job(folder, {
@@ -237,7 +254,41 @@ class GridPanel {
     });
   }
 
+  /** Runs the face model on a photo in this tab (MediaPipe needs a browser page). */
+  async detectFaces(data: Uint8Array, mime: string, modelFile: string): Promise<FaceMetric[] | undefined> {
+    await this.ready;
+    const w = this.panel.webview;
+    const ext = this.owner.ctx.context.extensionUri;
+    const mp = vscode.Uri.joinPath(ext, 'node_modules', '@mediapipe', 'tasks-vision');
+    return new Promise((resolve) => {
+      const id = this.nextId++;
+      const timer = setTimeout(() => {
+        this.pendingFaces.delete(id);
+        resolve(undefined);
+      }, 60000);
+      this.pendingFaces.set(id, (f) => {
+        clearTimeout(timer);
+        resolve(f);
+      });
+      void post(w, {
+        type: 'faces',
+        id,
+        data,
+        mime,
+        runtime: {
+          bundle: w.asWebviewUri(vscode.Uri.joinPath(mp, 'vision_bundle.mjs')).toString(),
+          wasm: w.asWebviewUri(vscode.Uri.joinPath(mp, 'wasm')).toString(),
+          model: w.asWebviewUri(vscode.Uri.file(modelFile)).toString(),
+        },
+      });
+    });
+  }
+
   dispose(): void {
+    for (const r of this.pendingFaces.values()) {
+      r(undefined);
+    }
+    this.pendingFaces.clear();
     this.job.dispose();
     for (const resolve of this.pending.values()) {
       resolve(undefined);
@@ -300,6 +351,7 @@ class GridPanel {
     const uriOf = (n: string) => vscode.Uri.file(path.join(this.folder.fsPath, n));
     switch (m.type) {
       case 'ready':
+        this.markReady();
         await this.reload();
         break;
       case 'refresh':
@@ -354,6 +406,12 @@ class GridPanel {
       case 'undoAutoRank':
         host?.undoAutoRank?.(this.folder);
         break;
+      case 'facesResult': {
+        const r = this.pendingFaces.get(m.id);
+        this.pendingFaces.delete(m.id);
+        r?.(m.error ? undefined : (m.faces ?? []));
+        break;
+      }
       case 'makeBest':
         host?.makeBest?.(this.folder, m.name);
         break;

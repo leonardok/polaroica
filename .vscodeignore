@@ -9,3 +9,6 @@ node_modules/@jsquash/jpeg/codec/enc/**
 node_modules/@jsquash/webp/codec/dec/**
 node_modules/**/*.d.ts
 node_modules/**/*.md
+node_modules/@mediapipe/tasks-vision/wasm/vision_wasm_module_internal.*
+node_modules/@mediapipe/tasks-vision/vision_bundle.cjs
+node_modules/@mediapipe/tasks-vision/vision_bundle.js

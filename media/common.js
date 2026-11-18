@@ -244,6 +244,7 @@
     ['eyes', 'Eyes open'],
     ['looking', 'Looking'],
     ['smile', 'Smiling'],
+    ['natural', 'Natural'],
     ['framing', 'Framing'],
   ];
 
@@ -282,5 +283,5 @@
     return navKey && (tag === 'SELECT' || (tag === 'INPUT' && t.type === 'range'));
   }
 
-  window.vsphoto = { vscode, h, icon, crumbs, detailsList, picture, blobUrl, makeThumbnail, section, photoContext, radar, rankExplanation, keyBelongsToControl };
+  window.vsphoto = { vscode, h, icon, crumbs, detailsList, picture, blobUrl, bytes, makeThumbnail, section, photoContext, radar, rankExplanation, keyBelongsToControl };
 })();

@@ -81,3 +81,24 @@ test('bursts: grouped by time and look; the best of each group is picked', () =>
   const strict = rankAlbum(items, { focus: true, exposure: true, similar: true, reject: true, burstSeconds: 2 });
   assert.equal(strict.find((r) => r.name.endsWith('01.JPG'))?.flag, 'reject');
 });
+
+test('faces: in a burst the frame where nobody blinked and people smile at the camera wins', async () => {
+  const { rankAlbum: rank, peopleScores } = await import('../core/rank');
+  const a = analyzePixels(image({ seed: 0 }));
+  const t0 = Date.UTC(2025, 5, 1, 15, 0, 0);
+  const face = (eyes: number, looking: number, smile: number) => ({ area: 0.02, eyes, looking, smile, natural: 90 });
+  const items = [
+    // same sharpness, different faces: one blink / everyone good / one looks away
+    { name: 'f1.JPG', time: t0, ...a, faces: [face(95, 90, 80), face(5, 90, 80)] },
+    { name: 'f2.JPG', time: t0 + 300, ...a, faces: [face(95, 90, 85), face(90, 85, 80)] },
+    { name: 'f3.JPG', time: t0 + 600, ...a, faces: [face(95, 20, 30), face(90, 85, 80)] },
+  ];
+  const res = rank(items, { focus: true, exposure: true, similar: true, reject: false, burstSeconds: 2, people: ['eyes', 'looking', 'smile', 'natural'] });
+  const by = Object.fromEntries(res.map((r) => [r.name, r]));
+  assert.equal(by['f2.JPG'].flag, 'pick');
+  assert.ok(by['f1.JPG'].notes.includes('eyes closed'));
+  assert.ok(by['f1.JPG'].scores.eyes < 40);
+  assert.match(by['f2.JPG'].reason, /eyes open/);
+  // A tiny face in the background is ignored.
+  assert.equal(peopleScores([{ area: 0.0005, eyes: 0, looking: 0, smile: 0, natural: 0 }], ['eyes']), undefined);
+});

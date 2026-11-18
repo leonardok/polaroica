@@ -5,7 +5,8 @@ import { Analysis } from './core/analyze';
 import { analyzeJpeg, codecThreads } from './core/codec';
 import { captureTime, embeddedPreviews, isBrowserJpeg, mpfPreviews, readExif } from './core/exif';
 import { extensionOf, isRaw } from './core/images';
-import { rankAlbum, RankInput, RankOptions } from './core/rank';
+import { FaceMetric, PeopleSignal, rankAlbum, RankInput, RankOptions } from './core/rank';
+import { ensureFaceModel } from './faceModel';
 import { emptySidecar, Sidecar } from './core/xmp';
 import { EditStore } from './edits';
 import { mapLimit, Photo, PhotoStore, readHead, readRange } from './photoStore';
@@ -17,9 +18,15 @@ interface Stored extends Analysis {
   size: number;
   mtime: number;
   time?: number;
+  /** Faces found by the face model; absent until a run used it. */
+  faces?: FaceMetric[];
 }
 
-type Choice = 'focus' | 'exposure' | 'similar' | 'keepMine' | 'reject';
+const PEOPLE: PeopleSignal[] = ['eyes', 'looking', 'smile', 'natural'];
+type Choice = 'focus' | 'exposure' | 'similar' | 'people' | PeopleSignal | 'keepMine' | 'reject';
+
+/** Measures faces in a photo (JPEG bytes); undefined when that failed. */
+export type FaceDetector = (folder: vscode.Uri, data: Uint8Array, mime: string, modelFile: string) => Promise<FaceMetric[] | undefined>;
 
 /**
  * Auto-Rank an album: measure each photo (focus, blown highlights, a look-alike hash, capture
@@ -35,6 +42,7 @@ export class AutoRanker {
     private readonly store: PhotoStore,
     private readonly edits: EditStore,
     private readonly done: (folder: vscode.Uri, summary: string | undefined) => void,
+    private readonly faces: FaceDetector,
   ) {}
 
   async run(folder: vscode.Uri): Promise<void> {
@@ -53,7 +61,19 @@ export class AutoRanker {
       similar: choices.has('similar'),
       reject: choices.has('reject'),
       burstSeconds: vscode.workspace.getConfiguration('vsphoto').get<number>('autoRank.burstSeconds', 2),
+      people: PEOPLE.filter((k) => choices.has(k)),
     };
+    let model: string | undefined;
+    if (opts.people!.length) {
+      model = await ensureFaceModel(this.context);
+      if (!model) {
+        const go = await vscode.window.showWarningMessage('Rank without the people options?', { modal: true, detail: 'Without the face model Auto-Rank can’t judge eyes, gaze or expressions.' }, 'Rank Without');
+        if (go !== 'Rank Without') {
+          return;
+        }
+        opts.people = [];
+      }
+    }
     const keepMine = choices.has('keepMine');
     const fc = await this.store.cache.folder(folder.fsPath);
     const stored = new Map(Object.entries(fc.getExtra<Record<string, Stored>>(ANALYSIS_KEY) ?? {}));
@@ -63,15 +83,21 @@ export class AutoRanker {
       async (progress, token) => {
         let doneCount = 0;
         const step = 100 / photos.length;
-        await mapLimit(photos, codecThreads(), async (p) => {
+        await mapLimit(photos, model ? Math.min(codecThreads(), 3) : codecThreads(), async (p) => {
           if (token.isCancellationRequested) {
             return;
           }
           const prev = stored.get(p.name);
-          if (!prev || prev.size !== p.size || prev.mtime !== p.mtime) {
+          const fresh = prev && prev.size === p.size && prev.mtime === p.mtime;
+          if (!fresh || (model && !prev.faces)) {
             const a = await this.analyze(p).catch(() => undefined);
             if (a) {
-              stored.set(p.name, { ...a, size: p.size, mtime: p.mtime });
+              const { bytes, ...m } = a;
+              let faces = fresh ? prev.faces : undefined;
+              if (model && !token.isCancellationRequested) {
+                faces = (await this.faces(folder, bytes, 'image/jpeg', model).catch(() => undefined)) ?? faces;
+              }
+              stored.set(p.name, { ...m, faces, size: p.size, mtime: p.mtime });
             }
           }
           doneCount++;
@@ -89,7 +115,7 @@ export class AutoRanker {
       .filter((p) => stored.has(p.name))
       .map((p) => {
         const s = stored.get(p.name)!;
-        return { name: p.name, time: s.time, sharpness: s.sharpness, blown: s.blown, hash: s.hash };
+        return { name: p.name, time: s.time, sharpness: s.sharpness, blown: s.blown, hash: s.hash, faces: s.faces };
       });
     const results = rankAlbum(inputs, opts);
 
@@ -127,12 +153,16 @@ export class AutoRanker {
     const groups = new Set(results.filter((r) => r.group).map((r) => r.group!.id)).size;
     const blurry = results.filter((r) => r.notes.includes('blurry')).length;
     const washed = results.filter((r) => r.notes.includes('washed out')).length;
+    const closed = results.filter((r) => r.notes.includes('eyes closed')).length;
+    const withFaces = inputs.filter((i) => i.faces?.length).length;
     const missed = photos.length - inputs.length;
     const parts = [
       `Auto-ranked ${written} photo${written === 1 ? '' : 's'}`,
       opts.similar ? `${groups} group${groups === 1 ? '' : 's'} of similar shots` : '',
       opts.focus ? `${blurry} blurry` : '',
       opts.exposure ? `${washed} washed out` : '',
+      opts.people?.length ? `people in ${withFaces}` : '',
+      opts.people?.includes('eyes') ? `${closed} with eyes closed` : '',
     ].filter(Boolean);
     const summary =
       parts[0] +
@@ -185,7 +215,7 @@ export class AutoRanker {
   }
 
   /** Bytes good enough to measure: the camera's built-in preview, else the whole file. */
-  private async analyze(p: Photo): Promise<(Analysis & { time?: number }) | undefined> {
+  private async analyze(p: Photo): Promise<(Analysis & { time?: number; bytes: Uint8Array }) | undefined> {
     const head = await readHead(p.uri.fsPath, 512 * 1024).catch(() => undefined);
     if (!head) {
       return undefined;
@@ -198,7 +228,7 @@ export class AutoRanker {
       if (!bytes || bytes.length !== r.length || !isBrowserJpeg(bytes)) continue;
       const a = await analyzeJpeg(bytes).catch(() => undefined);
       if (a && Math.max(a.sourceWidth, a.sourceHeight) >= 900) {
-        return { sharpness: a.sharpness, blown: a.blown, hash: a.hash, time };
+        return { sharpness: a.sharpness, blown: a.blown, hash: a.hash, time, bytes };
       }
     }
     const ext = extensionOf(p.name);
@@ -210,7 +240,7 @@ export class AutoRanker {
       return undefined;
     }
     const a = await analyzeJpeg(full);
-    return { sharpness: a.sharpness, blown: a.blown, hash: a.hash, time };
+    return { sharpness: a.sharpness, blown: a.blown, hash: a.hash, time, bytes: full };
   }
 
   private async pickChoices(album: string, count: number): Promise<Set<Choice> | undefined> {
@@ -221,6 +251,11 @@ export class AutoRanker {
       { id: 'focus', label: '$(eye) Focus', detail: 'Blurry or out-of-focus photos rank lower' },
       { id: 'exposure', label: '$(lightbulb) Washed-out highlights', detail: 'Photos with blown-out white areas rank lower' },
       { id: 'similar', label: '$(layers) Similar shots', detail: 'Group bursts and near-duplicates; the best of each group is picked' },
+      { id: 'people', label: '$(person) People', detail: 'Judge faces with a face model that runs on this computer (one-time 3.7 MB download)' },
+      { id: 'eyes', label: '$(blank)$(blank) Eyes open', description: 'nobody blinking' },
+      { id: 'looking', label: '$(blank)$(blank) Looking at the camera', description: 'face and eyes towards the lens' },
+      { id: 'smile', label: '$(blank)$(blank) Smiling' },
+      { id: 'natural', label: '$(blank)$(blank) Natural expression', description: 'not caught mid-word or frowning' },
       { label: 'Then', kind: vscode.QuickPickItemKind.Separator },
       { id: 'keepMine', label: '$(lock) Keep my own ratings', detail: 'Photos you already flagged or starred are left as they are' },
       { id: 'reject', label: '$(close) Reject the worst automatically', detail: 'Very blurry or washed-out photos, and the weaker shots of each group, are flagged as rejects' },
@@ -231,12 +266,32 @@ export class AutoRanker {
     qp.canSelectMany = true;
     qp.items = items;
     qp.selectedItems = items.filter((i) => i.id && saved.has(i.id));
+    // "People" switches its four signals on and off together; picking one signal turns People on.
+    let before = new Set(qp.selectedItems.map((i) => i.id));
+    qp.onDidChangeSelection((sel) => {
+      const now = new Set(sel.map((i) => i.id));
+      const isSignal = (id?: Choice) => !!id && (PEOPLE as Choice[]).includes(id);
+      if (now.has('people') && !before.has('people')) {
+        PEOPLE.forEach((k) => now.add(k));
+      } else if (!now.has('people') && before.has('people')) {
+        PEOPLE.forEach((k) => now.delete(k));
+      } else if ([...now].some(isSignal)) {
+        now.add('people');
+      } else {
+        now.delete('people');
+      }
+      before = now;
+      const same = now.size === sel.length && sel.every((i) => now.has(i.id));
+      if (!same) {
+        qp.selectedItems = items.filter((i) => i.id && now.has(i.id));
+      }
+    });
     return new Promise((resolve) => {
       let doneFlag = false;
       qp.onDidAccept(async () => {
         const chosen = new Set(qp.selectedItems.map((i) => i.id).filter((x): x is Choice => !!x));
-        if (!['focus', 'exposure', 'similar'].some((k) => chosen.has(k as Choice))) {
-          qp.placeholder = 'Choose at least one of Focus, Washed-out highlights or Similar shots';
+        if (!['focus', 'exposure', 'similar', ...PEOPLE].some((k) => chosen.has(k as Choice))) {
+          qp.placeholder = 'Choose at least one thing to consider';
           return;
         }
         doneFlag = true;
