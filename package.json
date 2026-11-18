@@ -2,7 +2,7 @@
   "name": "vsphoto",
   "displayName": "Photo Library",
   "description": "Browse and organize photo libraries — local folders and SMB network shares — inside VS Code.",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "publisher": "leonardok",
   "license": "GPL-3.0-or-later",
   "repository": {

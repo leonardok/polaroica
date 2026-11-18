@@ -13,6 +13,17 @@
   flex: 1 0 260px;
   max-width: 320px;
 }
+/* Side by side with the grid: the panel stays in view while the photos scroll, with its own
+   scrollbar when its sections are taller than the window. (On narrow tabs it wraps below.) */
+@media (min-width: 760px) {
+  .details {
+    position: sticky;
+    top: 0;
+    align-self: flex-start;
+    height: 100vh;
+    box-sizing: border-box;
+  }
+}
 .count {
   font-size: 12px;
   color: var(--muted);
