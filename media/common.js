@@ -97,7 +97,27 @@
 
   /** Object URL for bytes sent by the extension (Uint8Array). */
   function blobUrl(data, mime) {
-    return URL.createObjectURL(new Blob([data], { type: mime }));
+    return URL.createObjectURL(new Blob([bytes(data)], { type: mime }));
+  }
+
+  /** Bytes from a message: Uint8Array normally; tolerate {type:'Buffer',data:[...]} and arrays. */
+  function bytes(data) {
+    if (data instanceof Uint8Array) {
+      return data;
+    }
+    if (data instanceof ArrayBuffer) {
+      return new Uint8Array(data);
+    }
+    if (Array.isArray(data)) {
+      return Uint8Array.from(data);
+    }
+    if (data && data.type === 'Buffer' && Array.isArray(data.data)) {
+      return Uint8Array.from(data.data);
+    }
+    if (data && typeof data === 'object') {
+      return Uint8Array.from(Object.values(data)); // {"0":255,"1":216,...}
+    }
+    return new Uint8Array(0);
   }
 
   /**
@@ -105,7 +125,7 @@
    * because it has the browser's image decoders; the extension stores the result.
    */
   async function makeThumbnail(data, mime, px) {
-    const blob = new Blob([data], { type: mime });
+    const blob = new Blob([bytes(data)], { type: mime });
     let source;
     try {
       source = await createImageBitmap(blob); // applies EXIF orientation

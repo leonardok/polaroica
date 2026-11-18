@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { fromWire, toWire } from '../core/wire';
 import { test } from 'node:test';
 import { cameraLabel, embeddedPreviews, embeddedThumbnail, formatExifDate, formatExposure, isBrowserJpeg, readExif } from '../core/exif';
 import { compareNames, extensionOf, isDisplayable, isHiddenFolder, isPhoto, isRaw, nextFreeName, sortPhotos } from '../core/images';
@@ -197,4 +198,39 @@ test('embedded EXIF thumbnail (JPEG) and RAW previews', () => {
 
   assert.ok(isBrowserJpeg(jpeg));
   assert.ok(!isBrowserJpeg(new Uint8Array([0xff, 0xd8, 0xff, 0xc3, 0, 2])), 'lossless JPEG (RAW sensor data)');
+});
+
+/** How VS Code serializes webview messages: typed arrays by constructor name, the rest as JSON. */
+function vscodeSerialize(msg: unknown): unknown {
+  const known = new Set(['Uint8Array', 'Int8Array', 'Uint8ClampedArray', 'Int16Array', 'Uint16Array', 'Int32Array', 'Uint32Array', 'Float32Array', 'Float64Array', 'BigInt64Array', 'BigUint64Array']);
+  const buffers: Uint8Array[] = [];
+  const json = JSON.stringify(msg, function (_k, v) {
+    const raw = this[_k];
+    if (ArrayBuffer.isView(raw) && known.has(raw.constructor.name)) {
+      buffers.push(new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength).slice());
+      return { $$buf: buffers.length - 1 };
+    }
+    return v;
+  });
+  return JSON.parse(json, (_k, v) => (v && typeof v === 'object' && '$$buf' in v ? buffers[v.$$buf] : v));
+}
+
+test('binary survives the trip to the webview', () => {
+  const big = Buffer.alloc(1000, 7);
+  const pooled = Buffer.from('hello'); // a slice of Node's shared pool
+  const slice = big.subarray(10, 20);
+  const raw = vscodeSerialize({ items: [{ data: big }] }) as { items: Array<{ data: unknown }> };
+  assert.ok(!(raw.items[0].data instanceof Uint8Array), 'a bare Buffer does NOT survive (the bug)');
+
+  const sent = vscodeSerialize(toWire({ type: 'thumbs', items: [{ name: 'a', data: big }, { name: 'b', data: pooled }, { name: 'c', data: slice }] })) as {
+    items: Array<{ data: Uint8Array }>;
+  };
+  assert.ok(sent.items[0].data instanceof Uint8Array);
+  assert.equal(sent.items[0].data.length, 1000);
+  assert.deepEqual(Buffer.from(sent.items[1].data).toString(), 'hello');
+  assert.equal(sent.items[2].data.length, 10);
+
+  assert.deepEqual(fromWire(new Uint8Array([1, 2]))?.toJSON().data, [1, 2]);
+  assert.deepEqual(fromWire({ type: 'Buffer', data: [3, 4] })?.toJSON().data, [3, 4]);
+  assert.deepEqual(fromWire({ 0: 5, 1: 6 })?.toJSON().data, [5, 6]);
 });

@@ -7,7 +7,7 @@ import { Mover } from './move';
 import { Photo, PhotoStore } from './photoStore';
 import { isDisplayable, isRaw } from './core/images';
 import { rawPreview, ThumbService } from './thumbs';
-import { localRoots, webviewHtml } from './webview';
+import { localRoots, post, webviewHtml } from './webview';
 
 type FromViewer =
   | { type: 'ready' }
@@ -112,7 +112,7 @@ class PhotoViewer {
     try {
       photos = await this.owner.store.photos(this.folder, this.sort);
     } catch (err) {
-      void this.panel.webview.postMessage({ type: 'error', message: `Can't read ${this.folder.fsPath}: ${String(err)}` });
+      void post(this.panel.webview, { type: 'error', message: `Can't read ${this.folder.fsPath}: ${String(err)}` });
       return;
     }
     if (gen !== this.generation) {
@@ -134,7 +134,7 @@ class PhotoViewer {
     const webview = this.panel.webview;
     if (!photo) {
       this.panel.title = 'No photos';
-      void webview.postMessage({ type: 'empty', crumbs: this.owner.libraries.crumbs(this.folder) });
+      void post(webview, { type: 'empty', crumbs: this.owner.libraries.crumbs(this.folder) });
       return;
     }
     this.name = photo.name;
@@ -153,7 +153,7 @@ class PhotoViewer {
     const neighbours = [this.photos[this.index + 1], this.photos[this.index - 1]]
       .filter((p): p is Photo => !!p && isDisplayable(p.name))
       .map((p) => webview.asWebviewUri(p.uri).toString());
-    void webview.postMessage({
+    void post(webview, {
       type: 'show',
       crumbs: this.owner.libraries.crumbs(this.folder),
       index: this.index,
@@ -174,7 +174,7 @@ class PhotoViewer {
     const work: Promise<unknown>[] = [
       detailRows(this.owner.store, photo).then((rows) => {
         if (this.current === photo) {
-          void webview.postMessage({ type: 'details', rows });
+          void post(webview, { type: 'details', rows });
         }
       }),
     ];
@@ -182,7 +182,7 @@ class PhotoViewer {
       work.push(
         rawPreview(photo.uri.fsPath).then((data) => {
           if (this.current === photo) {
-            void webview.postMessage({ type: 'preview', name: photo.name, data });
+            void post(webview, { type: 'preview', name: photo.name, data });
           }
         }),
       );
@@ -190,7 +190,7 @@ class PhotoViewer {
       work.push(
         this.owner.thumbs.placeholder(photo).then((data) => {
           if (data && this.current === photo) {
-            void webview.postMessage({ type: 'placeholder', name: photo.name, data });
+            void post(webview, { type: 'placeholder', name: photo.name, data });
           }
         }),
       );

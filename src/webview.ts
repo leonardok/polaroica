@@ -1,6 +1,9 @@
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as vscode from 'vscode';
+import { toWire } from './core/wire';
+
+export { fromWire } from './core/wire';
 
 export function nonce(): string {
   return crypto.randomBytes(16).toString('base64');
@@ -63,3 +66,9 @@ export function escapeHtml(s: string): string {
 export function localRoots(extensionUri: vscode.Uri): vscode.Uri[] {
   return [vscode.Uri.joinPath(extensionUri, 'media'), ...(vscode.workspace.workspaceFolders ?? []).map((f) => f.uri)];
 }
+
+/** postMessage with binary data made safe for the webview (see toWire). */
+export function post(webview: vscode.Webview, message: unknown): Thenable<boolean> {
+  return webview.postMessage(toWire(message));
+}
+
