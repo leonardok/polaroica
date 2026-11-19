@@ -89,8 +89,6 @@ next to your photos).
   Moves between libraries copy, verify, then delete the original; name clashes ask Keep Both /
   Skip. Edits and cached thumbnails move with the photo.
 
-Design: see [`docs/design`](docs/design).
-
 ## Network shares (SMB)
 
 The extension does not speak SMB itself and stores no passwords. Connect to the share the way
