@@ -92,6 +92,8 @@ export function activate(context: vscode.ExtensionContext): void {
     grids.offer(photo, t),
   );
   background.schedule();
+  // Lazy thumbnails: opening an album fills in its own (not its sub-albums').
+  grids.onOpen = (folder) => background.albumOpened(folder);
 
   const tree = new LibraryTree(libraries, store, async (files, target) => {
     await mover.move(files, target);
@@ -158,7 +160,7 @@ export function activate(context: vscode.ExtensionContext): void {
         if (background.enabled) {
           background.schedule(1000);
         } else {
-          background.stop();
+          background.stopBuildAll();
         }
       }
       if (e.affectsConfiguration('polaroica.thumbnailSize')) {
@@ -233,7 +235,30 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       if (uri) await ranker.undoRun(uri);
     }),
-    vscode.commands.registerCommand('polaroica.buildThumbnails', () => background.start()),
+    vscode.commands.registerCommand('polaroica.buildThumbnails', () => background.buildAll()),
+    vscode.commands.registerCommand('polaroica.buildThumbnailsHere', async (arg?: unknown) => {
+      const uri = uriOf(arg);
+      if (!uri) {
+        void vscode.window.showInformationMessage('Right-click an album in the Polaroica sidebar to build its thumbnails.');
+        return;
+      }
+      const name = path.basename(uri.fsPath) || uri.fsPath;
+      const listing = await store.listing(uri).catch(() => undefined);
+      let recursive = false;
+      if (listing?.folders.length) {
+        const only = { label: `$(file-media) ${name}`, detail: 'Just the photos in this album', recursive: false };
+        const all = { label: `$(folder-library) ${name} and its sub-albums`, detail: 'Every album inside it too', recursive: true };
+        const pick = await vscode.window.showQuickPick([only, all], { title: 'Build Thumbnails Here', placeHolder: 'Which photos?' });
+        if (!pick) {
+          return;
+        }
+        recursive = pick.recursive;
+      } else if (listing && !listing.photos.length) {
+        void vscode.window.showInformationMessage(`${name} has no photos.`);
+        return;
+      }
+      background.buildHere(uri, recursive);
+    }),
     vscode.commands.registerCommand('polaroica.thumbnailProgress', async () => {
       const running = background.status === 'running';
       const paused = background.status === 'paused';

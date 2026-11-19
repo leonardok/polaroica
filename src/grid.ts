@@ -96,7 +96,11 @@ export class GridPanels implements vscode.Disposable {
     this.host = host;
   }
 
+  /** Set by the extension: an album was opened (or brought back to the front). */
+  onOpen?: (folder: vscode.Uri) => void;
+
   open(folder: vscode.Uri): void {
+    this.onOpen?.(folder);
     const existing = this.panels.get(folder.fsPath);
     if (existing) {
       existing.panel.reveal();

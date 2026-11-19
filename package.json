@@ -113,6 +113,12 @@
         "icon": "$(run-all)"
       },
       {
+        "command": "polaroica.buildThumbnailsHere",
+        "title": "Build Thumbnails Here…",
+        "category": "Polaroica",
+        "icon": "$(file-media)"
+      },
+      {
         "command": "polaroica.thumbnailProgress",
         "title": "Thumbnail Progress…",
         "category": "Polaroica",
@@ -223,6 +229,11 @@
           "group": "3_reveal@1"
         },
         {
+          "command": "polaroica.buildThumbnailsHere",
+          "when": "view == polaroica.libraries && viewItem =~ /^(library|folder)$/",
+          "group": "4_thumbs@1"
+        },
+        {
           "command": "polaroica.removeLibrary",
           "when": "view == polaroica.libraries && viewItem =~ /^library/",
           "group": "9_library@1"
@@ -321,8 +332,8 @@
         },
         "polaroica.backgroundThumbnails": {
           "type": "boolean",
-          "default": true,
-          "description": "Build thumbnails for every photo in your libraries in the background: a quick pass from each photo's small EXIF preview, then sharp thumbnails from the camera's built-in preview (or the full file). Reads the share gently and waits while you browse."
+          "default": false,
+          "description": "Build thumbnails for every photo in every library in the background, starting when the window opens: a quick pass from each photo's small EXIF preview, then sharp thumbnails from the camera's built-in preview (or the full file). Off by default: thumbnails are built as you open albums, and Build Thumbnails Here (right-click an album) builds ahead of time. For a very large library, raise Cache Size MB before turning this on."
         },
         "polaroica.autoRank.burstSeconds": {
           "type": "number",
