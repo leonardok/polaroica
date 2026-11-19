@@ -29,7 +29,6 @@
 
   // ---- culling state ----
   let cull = null; // { rating, flag, auto } of the current photo
-  let progress = { picks: 0, rejects: 0, toGo: 0 };
   let rateBarEl, stripFlagEl;
   let autoAdvance = (vscode.getState() || {}).autoAdvance !== false;
 
@@ -37,13 +36,13 @@
   const track = (u) => (urls.push(u), u);
 
   const panel = A.createPanel({
-    note: 'Saved next to the photo in .sidecar/ — the original file is never changed.',
     onChange: (e, commit) => change(e, commit),
     onCopy: (e) => {
       post({ type: 'copyEdits', edits: e });
       panel.setCanPaste(true);
     },
     onPaste: () => post({ type: 'pasteEdits' }),
+    autoContext: () => (renderer && glName && current ? { sample: renderer.sample, faces: current.faces, raw: !!current.photo.raw } : undefined),
   });
 
   function adjustOpen() {
@@ -70,9 +69,9 @@
     panel.setReference(undefined); // this photo's own temperature arrives separately
     panel.set(edits);
     panel.setCanPaste(!!m.canPaste);
+    panel.setCanAuto(false);
     panel.drawHistogram(undefined);
     cull = m.cull ? { ...m.cull } : null;
-    progress = m.progress || { picks: 0, rejects: 0, toGo: 0 };
     if (renderer) {
       renderer.bypass = false;
     }
@@ -282,6 +281,7 @@
     noteEl.remove();
     layoutCanvas();
     histogramSoon(0);
+    panel.setCanAuto(true);
     paintEditState();
     preload(for_);
   }
@@ -498,8 +498,8 @@
       h(
         'div',
         { class: 'flags' },
-        h('button', { class: 'flag-btn' + (c.flag === 'pick' ? ' pick' : ''), 'aria-pressed': String(c.flag === 'pick'), title: 'Pick (P)', onclick: () => rate({ flag: c.flag === 'pick' ? null : 'pick' }) }, icon('check', 12), 'Pick ', h('kbd', {}, 'P')),
-        h('button', { class: 'flag-btn' + (c.flag === 'reject' ? ' reject' : ''), 'aria-pressed': String(c.flag === 'reject'), title: 'Reject (X)', onclick: () => rate({ flag: c.flag === 'reject' ? null : 'reject' }) }, icon('x', 12), 'Reject ', h('kbd', {}, 'X')),
+        h('button', { class: 'flag-btn icon' + (c.flag === 'pick' ? ' pick' : ''), 'aria-pressed': String(c.flag === 'pick'), 'aria-label': 'Pick', title: 'Pick (P)', onclick: () => rate({ flag: c.flag === 'pick' ? null : 'pick' }) }, icon('check', 14)),
+        h('button', { class: 'flag-btn icon' + (c.flag === 'reject' ? ' reject' : ''), 'aria-pressed': String(c.flag === 'reject'), 'aria-label': 'Reject', title: 'Reject (X)', onclick: () => rate({ flag: c.flag === 'reject' ? null : 'reject' }) }, icon('x', 14)),
       ),
       h(
         'div',
@@ -507,28 +507,30 @@
         [1, 2, 3, 4, 5].map((k) => h('button', { class: 'star' + (k <= (c.rating || 0) ? ' on' : ''), role: 'radio', 'aria-checked': String(c.rating === k), 'aria-label': `${k} star${k > 1 ? 's' : ''}`, title: `${k} (key ${k})`, onclick: () => rate({ rating: c.rating === k ? 0 : k }) }, '★')),
         spark,
       ),
-      h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: autoAdvance, onchange: (e) => { autoAdvance = e.target.checked; vscode.setState({ ...(vscode.getState() || {}), autoAdvance }); } }), 'Auto-advance'),
-      h('span', { class: 'cull-progress' }, `${progress.picks} picks · ${progress.rejects} rejects · ${progress.toGo} to go`),
+      h(
+        'button',
+        {
+          class: 'icon-btn advance' + (autoAdvance ? ' on' : ''),
+          'aria-pressed': String(autoAdvance),
+          'aria-label': 'Auto-advance',
+          title: `Auto-advance: ${autoAdvance ? 'on' : 'off'} · go to the next photo after you pick, reject or rate one`,
+          onclick: () => {
+            autoAdvance = !autoAdvance;
+            vscode.setState({ ...(vscode.getState() || {}), autoAdvance });
+            paintRateBar();
+          },
+        },
+        icon('advance'),
+      ),
     );
   }
 
   function rate(change) {
     if (!current) return;
-    const before = (cull && cull.flag) || null;
     cull = Object.assign({ rating: 0 }, cull || {});
     if ('rating' in change) cull.rating = change.rating;
     if ('flag' in change) cull.flag = change.flag || undefined;
     delete cull.auto;
-    const after = cull.flag || null;
-    if (before !== after) {
-      // keep the counts right without asking the extension
-      if (before === 'pick') progress.picks--;
-      else if (before === 'reject') progress.rejects--;
-      else progress.toGo--;
-      if (after === 'pick') progress.picks++;
-      else if (after === 'reject') progress.rejects++;
-      else progress.toGo++;
-    }
     post({ type: 'rate', name: current.photo.name, ...change });
     paintRateBar();
     if (stripFlagEl) {

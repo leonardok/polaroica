@@ -61,6 +61,9 @@ next to your photos).
   photo; flagging never moves or deletes anything.
 - **Adjust**: histogram, Exposure, Contrast, Highlights, Shadows, Whites, Blacks, Temperature (in
   Kelvin, starting from the photo's own), Tint, Vibrance and Saturation, drawn live with WebGL.
+  **Auto** (the wand) sets the Light and Color sliders for a balanced picture: it meters on faces
+  found by Auto-Rank's People option (otherwise the middle of the frame), keeps night and snow
+  scenes dark or bright, and corrects colour casts part of the way. You can fine-tune or undo it.
   Before / After, undo / redo, Reset, Copy / Paste settings. Edits are **non-destructive**: they
   are saved in the same `.sidecar` file and the photo is never changed. Edited photos show an
   orange dot.

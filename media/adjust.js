@@ -130,6 +130,347 @@
     return roundKelvin(best);
   }
 
+  // ---- Auto -------------------------------------------------------------------------------
+
+  /** A small copy of the photo as loaded (before any edits): what Auto looks at. */
+  function samplePixels(bitmap) {
+    const s = Math.min(1, 192 / Math.max(bitmap.width, bitmap.height));
+    const w = Math.max(1, Math.round(bitmap.width * s));
+    const hh = Math.max(1, Math.round(bitmap.height * s));
+    const ctx = new OffscreenCanvas(w, hh).getContext('2d');
+    ctx.drawImage(bitmap, 0, 0, w, hh);
+    return ctx.getImageData(0, 0, w, hh);
+  }
+
+  const LIN = new Float32Array(256).map((_, i) => ((i /= 255) <= 0.04045 ? i / 12.92 : Math.pow((i + 0.055) / 1.055, 2.4)));
+  const toSrgb = (c) => (c <= 0 ? 0 : c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(Math.min(c, 4), 1 / 2.4) - 0.055);
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  const smoothstep = (a, b, x) => {
+    const t = clamp((x - a) / (b - a), 0, 1);
+    return t * t * (3 - 2 * t);
+  };
+  const BINS = 256;
+  /** The value below which a share `q` of a histogram's weight lies (bins over 0–1). */
+  function quantile(hist, total, q) {
+    let acc = 0;
+    const want = q * total;
+    for (let i = 0; i < BINS; i++) {
+      acc += hist[i];
+      if (acc >= want) return (i + 0.5) / BINS;
+    }
+    return 1;
+  }
+
+  /**
+   * How much each pixel counts when judging brightness: faces (from Auto-Rank, when it has run
+   * with People) carry most of the weight; otherwise the middle of the frame counts more than
+   * the edges. Blown light sources and sky count less.
+   */
+  function meteringWeights(sample, faces) {
+    const { width: w, height: hh, data: px } = sample;
+    const wt = new Float32Array(w * hh);
+    const inFace = new Uint8Array(w * hh);
+    let nFace = 0;
+    for (const f of faces || []) {
+      const x0 = Math.floor(f[0] * w);
+      const y0 = Math.floor(f[1] * hh);
+      const x1 = Math.ceil((f[0] + f[2]) * w);
+      const y1 = Math.ceil((f[1] + f[3]) * hh);
+      for (let y = Math.max(0, y0); y < Math.min(hh, y1); y++) {
+        for (let x = Math.max(0, x0); x < Math.min(w, x1); x++) {
+          if (!inFace[y * w + x]) nFace++;
+          inFace[y * w + x] = 1;
+        }
+      }
+    }
+    let other = 0;
+    for (let y = 0, j = 0; y < hh; y++) {
+      for (let x = 0; x < w; x++, j++) {
+        const dx = (x + 0.5) / w - 0.5;
+        const dy = (y + 0.5) / hh - 0.45; // subjects sit a little above the middle
+        let v = 0.5 + Math.exp(-(dx * dx + dy * dy) / (2 * 0.22 * 0.22));
+        const i = j * 4;
+        if (Math.max(px[i], px[i + 1], px[i + 2]) >= 250) v *= 0.3;
+        wt[j] = v;
+        if (!inFace[j]) other += v;
+      }
+    }
+    if (nFace) {
+      // Faces get 70% of the say, however small they are.
+      const each = (0.7 * other) / (0.3 * nFace);
+      for (let j = 0; j < wt.length; j++) if (inFace[j]) wt[j] = each;
+    }
+    return { wt, hasFaces: nFace > 0 };
+  }
+
+  /**
+   * White balance: the light estimated from the pixels that are probably grey or white in reality.
+   * First the overall colour cast of the mid tones (leaving out strongly coloured, black and blown
+   * pixels); then only the pixels close to that cast count — a grey wall under orange light is
+   * close to it, a face or a green leaf is not. Of those, a "shades of grey" average that leans on
+   * the brighter ones. Goes part of the way: less for RAW (the camera's own balance is usually
+   * close), less for night scenes (their blue or orange is the point) and less again when few
+   * pixels look neutral (a sunset, a forest).
+   */
+  function autoWhiteBalance(px, ref, raw, lowKey) {
+    const total = px.length / 4;
+    const out = { kelvin: 0, kelvinRef: 0, tint: 0, gains: [1, 1, 1] };
+    if (!(ref > 0)) return out;
+    const usable = (i) => {
+      const hi = Math.max(px[i], px[i + 1], px[i + 2]);
+      const lo = Math.min(px[i], px[i + 1], px[i + 2]);
+      return hi >= 40 && hi <= 245 && (hi - lo) / hi <= 0.5;
+    };
+    const chroma = (i) => {
+      const G = LIN[px[i + 1]] + 1e-4;
+      return [Math.log((LIN[px[i]] + 1e-4) / G), Math.log((LIN[px[i + 2]] + 1e-4) / G)];
+    };
+    let mr = 0;
+    let mb = 0;
+    let m = 0;
+    for (let i = 0; i < px.length; i += 4) {
+      if (!usable(i)) continue;
+      const [cr, cb] = chroma(i);
+      mr += cr;
+      mb += cb;
+      m++;
+    }
+    if (m < total * 0.05) return out;
+    mr /= m;
+    mb /= m;
+    let r = 0;
+    let g = 0;
+    let b = 0;
+    let n = 0;
+    for (let i = 0; i < px.length; i += 4) {
+      if (!usable(i)) continue;
+      const [cr, cb] = chroma(i);
+      if ((cr - mr) ** 2 + (cb - mb) ** 2 > 0.2 * 0.2) continue;
+      const R = LIN[px[i]];
+      const G = LIN[px[i + 1]];
+      const B = LIN[px[i + 2]];
+      r += R ** 4;
+      g += G ** 4;
+      b += B ** 4;
+      n++;
+    }
+    if (n < total * 0.03) return out;
+    r = Math.pow(r, 0.25);
+    g = Math.pow(g, 0.25);
+    b = Math.pow(b, 0.25);
+    const confidence = clamp(n / total / 0.25, 0.3, 1);
+    const strength = (raw ? 0.3 : 0.5) * confidence * (lowKey ? 0.4 : 1);
+    const w = whiteRgb(ref);
+    const neutral = kelvinOfRgb(w[0] * r, w[2] * b);
+    const cap = raw ? 30 : 60; // mired
+    const shift = clamp(strength * (1e6 / neutral - 1e6 / ref), -cap, cap);
+    if (Math.abs(shift) >= 6) {
+      out.kelvin = roundKelvin(1e6 / (1e6 / ref + shift));
+      out.kelvinRef = ref;
+    }
+    if (out.kelvin === ref) out.kelvin = out.kelvinRef = 0;
+    // Green / magenta: what is left once the warm / cool cast is fully gone. A scene that is
+    // green all over (a forest, a lawn) is left alone.
+    const kg = kelvinGains(ref, neutral);
+    const green = (g * kg[1]) / Math.sqrt(r * kg[0] * b * kg[2]);
+    const greenScene = green > 1 && mr < -0.25 && mb < -0.25;
+    const gain = 1 + 0.6 * strength * (1 / green - 1); // tint moves green by 1 - 0.18 * tint/100
+    out.tint = greenScene ? 0 : Math.round(clamp(((1 - gain) / 0.18) * 100, -10, 10));
+    if (Math.abs(out.tint) < 4) out.tint = 0;
+    out.gains = wbGains({ temp: 0, tint: out.tint, kelvin: out.kelvin, kelvinRef: out.kelvinRef });
+    return out;
+  }
+
+  /**
+   * Auto: Light and Color slider values for a balanced picture. It tries settings on a small copy
+   * of the original, drawn with the same maths as the photo itself, and keeps those that score
+   * best: the subject (faces, or the middle of the frame) at a pleasant brightness for the kind of
+   * scene, nothing newly blown or crushed, the full range of tones used, enough contrast — and no
+   * more change than needed. Only ordinary sliders are set (so it can be fine-tuned or undone);
+   * the tone curve and Saturation are kept. The same photo always gets the same values.
+   *
+   * `context`: { faces?: [x, y, w, h][] (0–1, upright), raw?: boolean }.
+   */
+  function autoEdits(sample, refKelvin, current, context) {
+    const ctx = context || {};
+    const px = sample.data;
+    const n = px.length / 4;
+    const roughKey = (() => {
+      const lum = new Float32Array(n);
+      for (let j = 0, i = 0; j < n; j++, i += 4) lum[j] = 0.2126 * LIN[px[i]] + 0.7152 * LIN[px[i + 1]] + 0.0722 * LIN[px[i + 2]];
+      lum.sort();
+      return toSrgb(lum[n >> 1]);
+    })();
+    const wb = autoWhiteBalance(px, refKelvin > 0 ? roundKelvin(refKelvin) : 0, !!ctx.raw, roughKey < 0.15);
+    const { wt, hasFaces } = meteringWeights(sample, ctx.faces);
+
+    // The pixels in linear light with the new white balance, and what the original looks like.
+    const R = new Float32Array(n);
+    const G = new Float32Array(n);
+    const B = new Float32Array(n);
+    const lumW = new Float64Array(BINS);
+    const lumU = new Float64Array(BINS);
+    let wSum = 0;
+    let clipped0 = 0;
+    let crushed0 = 0;
+    let sat = 0;
+    for (let j = 0, i = 0; j < n; j++, i += 4) {
+      R[j] = LIN[px[i]] * wb.gains[0];
+      G[j] = LIN[px[i + 1]] * wb.gains[1];
+      B[j] = LIN[px[i + 2]] * wb.gains[2];
+      const hi = Math.max(px[i], px[i + 1], px[i + 2]);
+      const lo = Math.min(px[i], px[i + 1], px[i + 2]);
+      if (hi >= 252) clipped0++;
+      if (hi <= 3) crushed0++;
+      sat += (hi - lo) / 255;
+      const s = toSrgb(0.2126 * R[j] + 0.7152 * G[j] + 0.0722 * B[j]);
+      const bin = Math.min(BINS - 1, Math.floor(clamp(s, 0, 1) * BINS));
+      lumW[bin] += wt[j];
+      lumU[bin]++;
+      wSum += wt[j];
+    }
+    clipped0 /= n;
+    crushed0 /= n;
+    const meanSat = sat / n;
+
+    // How bright the subject should end up, for this kind of scene (sRGB, 0–1).
+    const key = quantile(lumW, wSum, 0.5);
+    const lights = quantile(lumU, n, 0.99);
+    let target;
+    const highKey = !hasFaces && key > 0.6 && meanSat < 0.15;
+    if (hasFaces) {
+      target = 0.55; // faces a little above mid-grey
+    } else if (key < 0.15 && lights > 0.7) {
+      target = clamp(key * 1.6, key, 0.28); // night, a stage, a candle: keep it dark, lift a little
+    } else if (highKey) {
+      target = clamp(key, 0.46, 0.85); // snow, a beach, a white wall: keep it bright
+    } else {
+      target = 0.46 + 0.3 * (key - 0.46); // towards mid-grey, keeping some of the scene's own mood
+    }
+    const allowClip = Math.max(0.003, clipped0 * 1.2);
+    const allowCrush = Math.max(0.005, crushed0 * 1.2);
+
+    const histW = new Float64Array(BINS);
+    const histU = new Float64Array(BINS);
+    /** Draws the copy with these settings (the shader's maths, without the tone curve) and scores it. */
+    function cost(s) {
+      histW.fill(0);
+      histU.fill(0);
+      const ex = Math.pow(2, s.exposure);
+      const bp = (-0.12 * s.blacks) / 100;
+      const wp = 1 - (0.12 * s.whites) / 100;
+      const span = Math.max(wp - bp, 0.05);
+      const sh = s.shadows / 100;
+      const hl = s.highlights / 100;
+      const con = s.contrast / 100;
+      let clip = 0;
+      let crush = 0;
+      for (let j = 0; j < n; j++) {
+        let r = (toSrgb(R[j] * ex) - bp) / span;
+        let g = (toSrgb(G[j] * ex) - bp) / span;
+        let b = (toSrgb(B[j] * ex) - bp) / span;
+        const L = clamp(0.2126 * r + 0.7152 * g + 0.0722 * b, 0, 1);
+        const L2 = clamp(L + 0.28 * sh * (1 - smoothstep(0, 0.55, L)) + 0.28 * hl * smoothstep(0.45, 1, L), 0, 1.2);
+        const k = L2 / Math.max(L, 1e-3);
+        r = clamp(r * k, 0, 1);
+        g = clamp(g * k, 0, 1);
+        b = clamp(b * k, 0, 1);
+        if (con >= 0) {
+          r += (r * r * (3 - 2 * r) - r) * con;
+          g += (g * g * (3 - 2 * g) - g) * con;
+          b += (b * b * (3 - 2 * b) - b) * con;
+        } else {
+          r += (0.5 + (r - 0.5) * 0.4 - r) * -con;
+          g += (0.5 + (g - 0.5) * 0.4 - g) * -con;
+          b += (0.5 + (b - 0.5) * 0.4 - b) * -con;
+        }
+        const out = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        if (Math.max(r, g, b) >= 0.995) clip++;
+        if (out <= 0.012) crush++;
+        const bin = Math.min(BINS - 1, Math.floor(out * BINS));
+        histW[bin] += wt[j];
+        histU[bin]++;
+      }
+      clip /= n;
+      crush /= n;
+      const mid = quantile(histW, wSum, 0.5);
+      const top = quantile(histU, n, 0.995);
+      const bottom = quantile(histU, n, 0.005);
+      const spread = quantile(histU, n, 0.9) - quantile(histU, n, 0.1);
+      let c = 40 * (mid - target) ** 2;
+      c += 8 * Math.max(0, clip - allowClip) + 6 * Math.max(0, crush - allowCrush);
+      c += 4 * Math.max(0, 0.93 - top) ** 2 + (highKey ? 0 : 2 * Math.max(0, bottom - 0.04) ** 2);
+      c += Math.max(0, 0.35 - spread) ** 2 + Math.max(0, spread - 0.8) ** 2;
+      // Prefer small changes: a slider is only moved when it earns it.
+      c += 3e-5 * (Math.abs(s.exposure) * 50 + Math.abs(s.contrast) + Math.abs(s.highlights) + Math.abs(s.shadows) + Math.abs(s.whites) + Math.abs(s.blacks));
+      return c;
+    }
+
+    // Search one slider at a time, in shrinking steps, from a starting exposure that puts the
+    // subject on target.
+    const PARAMS = [
+      { id: 'exposure', step: 0.25, min: 0.05, lo: -2.5, hi: 2.5 },
+      { id: 'highlights', step: 20, min: 2, lo: -100, hi: 0 },
+      { id: 'shadows', step: 20, min: 2, lo: -20, hi: 100 },
+      { id: 'whites', step: 20, min: 2, lo: -60, hi: 60 },
+      { id: 'blacks', step: 20, min: 2, lo: -60, hi: 60 },
+      { id: 'contrast', step: 10, min: 2, lo: -30, hi: 35 },
+    ];
+    const keyLin = Math.max(1e-4, Math.pow((Math.max(key, 0.01) + 0.055) / 1.055, 2.4));
+    const targetLin = Math.pow((target + 0.055) / 1.055, 2.4);
+    const s = { exposure: clamp(Math.round(Math.log2(targetLin / keyLin) * 20) / 20, -2.5, 2.5), contrast: 0, highlights: 0, shadows: 0, whites: 0, blacks: 0 };
+    let best = cost(s);
+    for (let round = 0; round < 8; round++) {
+      let moved = false;
+      for (const p of PARAMS) {
+        for (const dir of [1, -1]) {
+          for (let k = 0; k < 6; k++) {
+            const v = clamp(s[p.id] + dir * p.step, p.lo, p.hi);
+            if (v === s[p.id]) break;
+            const old = s[p.id];
+            s[p.id] = v;
+            const c = cost(s);
+            if (c < best - 1e-7) {
+              best = c;
+              moved = true;
+            } else {
+              s[p.id] = old;
+              break;
+            }
+          }
+        }
+      }
+      if (!moved) {
+        let any = false;
+        for (const p of PARAMS) {
+          if (p.step > p.min) {
+            p.step = Math.max(p.min, p.step / 2);
+            any = true;
+          }
+        }
+        if (!any) break;
+      }
+    }
+
+    // Vibrance for muted colours (less with people: skin goes orange quickly; none for black and white).
+    const vibrance = meanSat < 0.03 ? 0 : Math.round(clamp((0.3 - meanSat) * 80, 0, hasFaces ? 10 : 20));
+
+    return {
+      ...clone(current),
+      exposure: Math.round(s.exposure * 20) / 20,
+      contrast: Math.round(s.contrast),
+      highlights: Math.round(s.highlights),
+      shadows: Math.round(s.shadows),
+      whites: Math.round(s.whites),
+      blacks: Math.round(s.blacks),
+      temp: 0,
+      kelvin: wb.kelvin,
+      kelvinRef: wb.kelvinRef,
+      tint: wb.tint,
+      vibrance,
+    };
+  }
+
   function clone(e) {
     return JSON.parse(JSON.stringify(e));
   }
@@ -350,6 +691,8 @@ void main() {
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
       this.width = src.width;
       this.height = src.height;
+      this.sample = samplePixels(src);
+      if (src !== bitmap) src.close();
     }
 
     setEdits(e) {
@@ -519,32 +862,38 @@ void main() {
       return false;
     }
 
-    const pasteBtn = h('button', { class: 'btn', onclick: () => opts.onPaste() }, 'Paste');
+    const iconBtn = (name, label, title, onclick) => h('button', { class: 'icon-btn', 'aria-label': label, title, onclick }, icon(name));
+    const autoBtn = iconBtn('wand', 'Auto', 'Auto: set Light and Color for a balanced picture (you can fine-tune or undo it)', () => {
+      const c = opts.autoContext && opts.autoContext();
+      if (!c || !c.sample) return;
+      edits = autoEdits(c.sample, ref ? ref.kelvin : 0, edits, c);
+      set(edits);
+      opts.onChange(clone(edits), true);
+    });
+    const pasteBtn = iconBtn('paste', 'Paste Settings', 'Paste settings', () => opts.onPaste());
     const el = h(
       'div',
       { class: 'adjust' },
-      h('div', { class: 'adj-block' }, histCanvas),
-      h('div', { class: 'adj-block' }, h('div', { class: 'adj-title' }, 'LIGHT'), ...SLIDERS.filter((s) => s.group === 'light').map(sliderRow)),
-      h('div', { class: 'adj-block' }, h('div', { class: 'adj-title' }, 'COLOR'), kRow, ...SLIDERS.filter((s) => s.group === 'color').map(sliderRow)),
       h(
         'div',
         { class: 'adj-block' },
         h(
           'div',
-          { class: 'actions' },
-          h('button', {
-            class: 'btn',
-            onclick: () => {
-              edits = defaults();
-              set(edits);
-              opts.onChange(clone(edits), true);
-            },
-          }, 'Reset'),
-          h('button', { class: 'btn', onclick: () => opts.onCopy(clone(edits)) }, 'Copy Settings'),
+          { class: 'adj-actions', role: 'toolbar', 'aria-label': 'Adjust actions' },
+          autoBtn,
+          h('span', { class: 'sep', 'aria-hidden': 'true' }),
+          iconBtn('reset', 'Reset', 'Reset all adjustments', () => {
+            edits = defaults();
+            set(edits);
+            opts.onChange(clone(edits), true);
+          }),
+          iconBtn('copy', 'Copy Settings', 'Copy settings', () => opts.onCopy(clone(edits))),
           pasteBtn,
         ),
-        h('p', { class: 'hint-small' }, opts.note),
       ),
+      h('div', { class: 'adj-block' }, histCanvas),
+      h('div', { class: 'adj-block' }, h('div', { class: 'adj-title' }, 'LIGHT'), ...SLIDERS.filter((s) => s.group === 'light').map(sliderRow)),
+      h('div', { class: 'adj-block' }, h('div', { class: 'adj-title' }, 'COLOR'), kRow, ...SLIDERS.filter((s) => s.group === 'color').map(sliderRow)),
     );
 
     function set(e) {
@@ -596,6 +945,7 @@ void main() {
 
     set(edits);
     drawHistogram(undefined);
+    autoBtn.disabled = true;
     return {
       el,
       set,
@@ -604,8 +954,12 @@ void main() {
       setCanPaste(on) {
         pasteBtn.disabled = !on;
       },
+      /** Auto needs the photo's pixels: off until they are loaded. */
+      setCanAuto(on) {
+        autoBtn.disabled = !on;
+      },
     };
   }
 
-  window.polaroicaAdjust = { defaults, clone, isDefault, same, createPanel, Renderer, curveTable, estimateKelvin };
+  window.polaroicaAdjust = { defaults, clone, isDefault, same, createPanel, Renderer, curveTable, estimateKelvin, autoEdits };
 })();

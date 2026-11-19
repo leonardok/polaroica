@@ -51,6 +51,17 @@ export type FaceDetector = (folder: vscode.Uri, pixels: Rgba, models: FaceModels
  * Photos you rated yourself are left alone unless you say otherwise. Undo restores the sidecars
  * as they were before the run.
  */
+/**
+ * Face boxes Auto-Rank found in a photo, as fractions of the upright photo ([x, y, w, h]); none
+ * when it hasn't run with People on this version of the file. Photo Auto adjust meters on them.
+ */
+export async function storedFaceBoxes(store: PhotoStore, photo: Photo): Promise<[number, number, number, number][]> {
+  const fc = await store.cache.folder(path.dirname(photo.uri.fsPath));
+  const s = fc.getExtra<Record<string, Stored>>(ANALYSIS_KEY)?.[photo.name];
+  if (!s || s.size !== photo.size || s.mtime !== photo.mtime) return [];
+  return (s.faces ?? []).flatMap((f) => (f.box ? [f.box] : []));
+}
+
 export class AutoRanker {
   private readonly undo = new Map<string, Array<{ photo: vscode.Uri; before: Sidecar }>>();
   /** Albums with a run that can be undone, most recent last. */

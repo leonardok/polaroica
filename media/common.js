@@ -49,6 +49,14 @@
     fit: 'M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10M5.5 5.5h5v5h-5z',
     // A magnifier with a "1" in it: one photo pixel per screen pixel.
     actual: 'M7 2.5a4.5 4.5 0 1 1 0 9a4.5 4.5 0 1 1 0-9M10.3 10.3l3.2 3.2M6 5.8l1.2-.8v4',
+    // Two chevrons and a bar: on to the next photo by itself.
+    advance: 'M3 4l4 4-4 4M8 4l4 4-4 4M13 4v8',
+    // A wand with a sparkle: Auto adjust.
+    wand: 'M2.5 13.5l7.5-7.5M8.5 4.5l3 3M12 1.5v3M10.5 3h3M14 7v2M13 8h2M4.5 2v2M3.5 3h2',
+    // An arrow turning back: everything to zero.
+    reset: 'M3 8a5 5 0 1 0 1.5-3.6M3 3v3h3',
+    copy: 'M5.5 5.5h7v8h-7zM3.5 10.5v-8h7',
+    paste: 'M5.5 3H3.5v10.5h9V3h-2M6 2h4v2.5H6z',
   };
   function icon(name, size) {
     const s = document.createElementNS(SVG_NS, 'svg');

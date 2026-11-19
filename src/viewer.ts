@@ -14,6 +14,7 @@ import { PhotoExporter } from './export';
 import { normalizeEdits } from './core/xmp';
 import { rawAsShotKelvin } from './core/exporter';
 import { mimeOf } from './thumbs';
+import { storedFaceBoxes } from './autorank';
 
 type FromViewer =
   | { type: 'ready' }
@@ -197,17 +198,11 @@ class PhotoViewer {
     }
     const view = toView(webview, photo);
     const raw = isRaw(photo.name);
-    const [edits, cullMap] = await Promise.all([
+    const [edits, cullMap, faces] = await Promise.all([
       this.owner.edits.load(photo.uri),
       this.owner.edits.cullingIn(this.folder.fsPath),
+      storedFaceBoxes(this.owner.store, photo).catch(() => []),
     ]);
-    let picks = 0;
-    let rejects = 0;
-    for (const p of this.photos) {
-      const f = cullMap.get(p.name)?.flag;
-      if (f === 'pick') picks++;
-      else if (f === 'reject') rejects++;
-    }
     if (this.current !== photo) {
       return;
     }
@@ -236,8 +231,8 @@ class PhotoViewer {
       preload: neighbours,
       edits,
       cull: cullMap.get(photo.name) ?? null,
-      progress: { picks, rejects, toGo: this.photos.length - picks - rejects },
       canPaste: !!this.owner.edits.clipboard,
+      faces,
     });
 
     const work: Promise<unknown>[] = [
