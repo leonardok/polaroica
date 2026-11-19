@@ -4,40 +4,13 @@ Browse, cull, edit and export photo libraries inside VS Code. A **library** is a
 an SMB network share your computer can already reach; it shows up in the **Polaroica** view in
 the activity bar.
 
-## Commands
-
-| Command | Where to find it | What it does |
-| --- | --- | --- |
-| **Add Library…** | **+** in the Libraries view, Command Palette | Add a local folder or a network share as a library. |
-| **Refresh** | Libraries view title, grid toolbar, Command Palette | Re-read the libraries from disk. |
-| **Remove Library** | Right-click a library | Remove it from the workspace (nothing is deleted). |
-| **Open Photos** | Click / right-click an album | Show the album's photos in the grid. |
-| **New Folder…** | Right-click a library or album | Create a sub-folder. |
-| **Move to…** | Right-click an album or photo (grid, photo tab) | Move photos or folders to another album or library. |
-| **Reveal in OS** | Right-click an album or photo | Show it in Finder / File Explorer. |
-| **Auto-Rank Album…** | Right-click an album, grid toolbar, Command Palette | Rate and group an album's photos automatically. |
-| **Undo Auto-Rank** | Right-click an album, Command Palette | Restore the ratings from before the last Auto-Rank. |
-| **Export to JPEG…** | Right-click an album or photo, grid toolbar, Command Palette | Export photos with your edits baked in. |
-| **Delete Rejected Photos…** | Right-click an album, grid toolbar, Command Palette | Send an album's rejected photos to the Trash. |
-| **Build Thumbnails Here…** | Album right-click | Build an album's thumbnails ahead of time, with or without its sub-albums. |
-| **Build All Thumbnails** | Command Palette | Start building thumbnails for every library. |
-| **Thumbnail Progress…** | Command Palette | Details of the thumbnail build; pause, resume or stop it. |
-| **Show Cache Info** | Command Palette | Size of the local cache, with an option to clear it. |
-| **Show Log** | Command Palette | Polaroica's log (thumbnails, Auto-Rank, face models). |
-
-All commands are under the **Polaroica** category in the Command Palette.
-
-### Keyboard
-
-| Key | Grid | Photo tab |
-| --- | --- | --- |
-| Arrows | Move the selection | ← → previous / next photo |
-| Enter / double-click | Open the photo in its own tab | Back to the grid (double-click) |
-| Ctrl/Cmd-click, Shift-click, Ctrl/Cmd+A | Select | |
-| `P` / `X` / `U` | Pick / Reject / clear the flag | same |
-| `0`–`5` | Star rating | same |
-| `\` (hold) | | Before / After |
-| Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z | | Undo / redo an adjustment |
+**[Website](https://leok.me/polaroica)** ·
+[Download](https://github.com/leonardok/polaroica/releases/latest) ·
+[Source](https://github.com/leonardok/polaroica) ·
+[Report an issue](https://github.com/leonardok/polaroica/issues) ·
+[Release notes](docs/release-notes) ·
+[Commands](docs/commands.md) ·
+[Settings](docs/settings.md)
 
 ## Install
 
@@ -47,11 +20,11 @@ later. The extension is published as `ChimarraoTech.polaroica`; if you have the 
 `leonardok.polaroica` installed, uninstall it first (your ratings and edits are kept, they live
 next to your photos).
 
-## Overview
+## What it does
 
 - **Libraries and albums**: each library is a root in the tree, with its folders (albums) below.
   Albums show their photo count; hover one for picks, rejects, photos still to cull, stars, edits
-  and RAW/JPEG counts. Libraries that can't be reached show as *offline*.
+  and RAW/JPEG counts.
 - **Grid**: justified rows of thumbnails with a size slider, sort order (name, date, size), a
   filter bar (All / Picks / Unflagged / Rejects, by stars, hide rejects) and a details panel with
   EXIF.
@@ -64,9 +37,8 @@ next to your photos).
   live with WebGL.
   **Auto** (the wand) sets the Light and Color sliders for a balanced picture: it meters on faces
   found by Auto-Rank's People option (otherwise the middle of the frame), keeps night and snow
-  scenes dark or bright, and corrects colour casts part of the way. You can fine-tune or undo it.
-  To add your own correction on top of every Auto (say, a little brighter and warmer), set the
-  amounts under **Settings › Polaroica › Auto Adjust**.
+  scenes dark or bright, and corrects colour casts part of the way. You can fine-tune or undo it,
+  and add your own correction on top of every Auto under **Settings › Polaroica › Auto Adjust**.
   Before / After, undo / redo, Reset, Copy / Paste settings. Edits are **non-destructive**: they
   are saved in the same `.sidecar` file and the photo is never changed. Edited photos show an
   orange dot.
@@ -88,45 +60,8 @@ next to your photos).
 - **Move**: move photos and folders between albums and libraries (or drag folders in the tree).
   Moves between libraries copy, verify, then delete the original; name clashes ask Keep Both /
   Skip. Edits and cached thumbnails move with the photo.
-
-## Network shares (SMB)
-
-The extension does not speak SMB itself and stores no passwords. Connect to the share the way
-you normally do, then add it (`\\nas\photos`, `smb://nas/photos`, or the mounted path):
-
-| OS | Connect with | The extension looks in |
-| --- | --- | --- |
-| Windows | File Explorer (sign in once) | `\\host\share` (UNC path) |
-| macOS | Finder › Go › Connect to Server | `/Volumes/share` |
-| Linux | Files › Other Locations (gvfs), or `mount -t cifs` | `/run/user/<uid>/gvfs/smb-share:server=host,share=share`, `/mnt/share`, `/media/share` |
-
-If the share isn't found there, choose the mounted folder yourself (the warning offers
-*Choose Mounted Folder…*).
-
-**Windows:** VS Code only opens UNC paths on hosts listed in `security.allowedUNCHosts`. When you
-add a share, the extension offers to add its host there for you.
-
-## Thumbnails and the local cache
-
-Photos on a share are big and the network is slow, so Polaroica keeps a **local cache** on this
-computer (in VS Code's extension storage, never on the share):
-
-- **Thumbnails**: small WebP files packed one file per folder; after the first visit a folder
-  loads from local disk in milliseconds.
-- **Built as you go**: opening an album makes the thumbnails it is missing, in the background,
-  for that album only (not its sub-albums). An album that is already done costs a moment of
-  local reads and shows nothing. Nothing is crawled up front, so a library of a million photos
-  is as quick to add as a small one.
-- **Building ahead**: **Build Thumbnails Here…** on an album (optionally with its sub-albums),
-  **Build All Thumbnails**, or the `polaroica.backgroundThumbnails` setting for every library at
-  startup. A **quick pass** uses the tiny EXIF preview in each photo so the albums are browsable
-  fast; a **sharp pass** uses the camera's larger built-in preview (or the full file when there
-  is none). They read the share gently, pause while you browse and resume after a restart.
-- **Folder index**: file names, sizes, dates and EXIF, so folders and photo counts appear
-  instantly while the share is re-checked in the background.
-- **Photo tabs** show the cached thumbnail at once while the original loads, and preload the
-  neighbours.
-- The cache is capped (`polaroica.cacheSizeMB`); the least recently viewed folders go first.
+- **Network shares**: add an SMB share you are already connected to and browse it like a local
+  folder, with thumbnails and a folder index kept in a local cache so it stays quick.
 
 ## Formats
 
@@ -134,21 +69,14 @@ The grid and photo tabs show JPEG, PNG, GIF, WebP, AVIF, BMP and SVG. Camera RAW
 ARW, DNG, ORF, RW2, PEF, RAF, …) show the preview JPEG embedded in the file. CR3, TIFF and HEIC
 display as a labelled placeholder.
 
-## Settings
+## Documentation
 
-| Setting | Default | |
-| --- | --- | --- |
-| `polaroica.sortBy` | `name` | Default order: `name`, `modified` or `size`. |
-| `polaroica.showPhotoCounts` | `true` | Photo counts in the tree. |
-| `polaroica.thumbnailSize` | `256` | Thumbnail long edge: 192, 256 or 320 px (≈ 4 / 6 / 9 KB each). |
-| `polaroica.cacheSizeMB` | `1024` | Disk space for the local cache (≈ 200,000 photos). |
-| `polaroica.backgroundThumbnails` | `false` | Build thumbnails for every library in the background at startup. Off: they are built as you open albums. |
-| `polaroica.autoRank.burstSeconds` | `2` | Auto-Rank: max seconds between frames of one burst. |
-| `polaroica.autoRank.sceneSeconds` | `60` | Auto-Rank: max seconds between shots of the same scene and framing that still stack (0 = bursts only). |
-| `polaroica.autoAdjust.*` | `0` | Auto adjust: your own correction added on top of every Auto (exposure, contrast, highlights, shadows, whites, blacks, temperature, tint, vibrance, saturation). |
-| `polaroica.export.quality` | `90` | JPEG quality of exports (50–100). |
-
-Every setting, with what it does and an example: [docs/settings.md](docs/settings.md).
+- [Commands and keyboard shortcuts](docs/commands.md)
+- [Settings](docs/settings.md) — every setting, with what it does and an example
+- [Network shares (SMB)](docs/network-shares.md) — how to connect on Windows, macOS and Linux
+- [Thumbnails and the local cache](docs/thumbnails.md)
+- [Release notes](docs/release-notes)
+- [Developing Polaroica](docs/development.md)
 
 ## Known limitations
 
@@ -158,23 +86,6 @@ Every setting, with what it does and an example: [docs/settings.md](docs/setting
 - If your editor doesn't accept drops from webviews, dragging photos from the grid onto the tree
   won't work; use *Move to…*.
 - File-change watching may not fire on every SMB server; use **Refresh**.
-
-## Develop
-
-```bash
-npm install
-```
-
-```bash
-npm test
-```
-
-Then press **F5** in VS Code (*Run Polaroica extension*) to start an Extension Development
-Host. To build a `.vsix`:
-
-```bash
-npx @vscode/vsce package
-```
 
 ## License
 
