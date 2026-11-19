@@ -2,8 +2,8 @@
   "name": "polaroica",
   "displayName": "Polaroica",
   "description": "Browse and organize photo libraries — local folders and SMB network shares — inside VS Code.",
-  "version": "0.10.5",
-  "publisher": "leonardok",
+  "version": "0.10.6",
+  "publisher": "ChimarraoTech",
   "icon": "media/icon.png",
   "galleryBanner": {
     "color": "#1c1917",
