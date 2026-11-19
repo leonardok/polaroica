@@ -69,3 +69,28 @@ test('eviction removes least recently used folders first', async () => {
   assert.equal((await new CacheManager(dir, 1e9).folder('/old')).thumbCount, 0);
   assert.equal((await new CacheManager(dir, 1e9).folder('/new')).thumbCount, 1);
 });
+
+test('thumbnails written after the last index save do not shift later ones (quit before save)', async () => {
+  const dir = tmp();
+  // First run: thumbnails appended, the app quits before the index is ever saved.
+  const first = await new CacheManager(dir, 1e9).folder('/q');
+  await first.putThumb('a.jpg', 1, 1, 256, thumb(1, 300));
+  await first.putThumb('b.jpg', 2, 2, 256, thumb(2, 200));
+
+  // Second run: no index on disk, but the pack has 500 bytes in it.
+  const second = await new CacheManager(dir, 1e9).folder('/q');
+  await second.putThumb('c.jpg', 3, 3, 256, thumb(3, 100));
+  let got = await second.getThumbs([{ name: 'c.jpg', size: 3, mtime: 3 }], 256);
+  assert.equal(got.get('c.jpg')?.data.every((b) => b === 3), true);
+  await second.flush();
+
+  // Third run: the index is saved, then another thumbnail goes in before the next save.
+  await second.putThumb('d.jpg', 4, 4, 256, thumb(4, 100));
+  const third = await new CacheManager(dir, 1e9).folder('/q');
+  await third.putThumb('e.jpg', 5, 5, 256, thumb(5, 100));
+  got = await third.getThumbs([{ name: 'c.jpg', size: 3, mtime: 3 }, { name: 'e.jpg', size: 5, mtime: 5 }], 256);
+  assert.equal(got.get('c.jpg')?.data.every((b) => b === 3), true);
+  assert.equal(got.get('e.jpg')?.data.every((b) => b === 5), true);
+  // Settle pending index saves one at a time (all three runs share one folder here).
+  for (const fc of [first, second, third]) await fc.flush();
+});

@@ -87,16 +87,24 @@ export class FolderCache {
       const parsed = JSON.parse(await fs.promises.readFile(path.join(dir, 'index.json'), 'utf8')) as IndexData;
       if (parsed.v === VERSION && parsed.path === folder) {
         data = parsed;
-        // A pack shorter than the index says (crash mid-write): drop the thumbnails.
-        const st = await fs.promises.stat(path.join(dir, 'thumbs.bin')).catch(() => undefined);
-        if ((st?.size ?? 0) < data.packSize) {
-          data.thumbs = {};
-          data.packSize = st?.size ?? 0;
-          data.garbage = data.packSize;
-        }
       }
     } catch {
       /* no index yet, or unreadable: start empty */
+    }
+    // The pack must match the index, because thumbnails are appended where the index says it ends.
+    const packed = (await fs.promises.stat(path.join(dir, 'thumbs.bin')).catch(() => undefined))?.size ?? 0;
+    if (data && packed < data.packSize) {
+      // Shorter than the index says (crash mid-write): drop the thumbnails.
+      data.thumbs = {};
+      data.packSize = packed;
+      data.garbage = packed;
+    } else if (packed > (data?.packSize ?? 0)) {
+      // Longer: thumbnails written after the index was last saved (the app quit before the
+      // save, or there's no index at all). Nothing points at them; count them as garbage so
+      // new thumbnails go after them and compaction reclaims the space.
+      data ??= { v: VERSION, path: folder, thumbs: {}, exif: {}, packSize: 0, garbage: 0 };
+      data.garbage += packed - data.packSize;
+      data.packSize = packed;
     }
     const fc = new FolderCache(folder, dir, data, onWrite);
     fc.touch();
