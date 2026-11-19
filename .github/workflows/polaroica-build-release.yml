@@ -1,8 +1,8 @@
-# Creates a GitHub release of the version in package.json, by hand: Actions tab → Release →
+# Creates a GitHub release of the version in package.json, by hand: Actions tab → polaroica-build-release →
 # Run workflow (on main). It tests and packages the extension, then publishes
 # polaroica-<version>.vsix with docs/release-notes/v<version>.md as the release text, plus the
 # file's SHA-256. Before running it: bump "version" in package.json and write the release notes.
-name: Release
+name: polaroica-build-release
 
 on:
   workflow_dispatch:
