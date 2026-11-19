@@ -349,6 +349,76 @@
           "maximum": 600,
           "description": "Auto-Rank: photos taken up to this many seconds apart also stack together when they show the same scene and framing (same colours in the same places) — the same pose shot again after a short pause. 0 turns this off."
         },
+        "polaroica.autoAdjust.exposure": {
+          "type": "number",
+          "default": 0,
+          "minimum": -2,
+          "maximum": 2,
+          "markdownDescription": "Auto adjust: added to the Exposure Auto sets, in EV (e.g. `0.3` for photos a little brighter than Auto makes them)."
+        },
+        "polaroica.autoAdjust.contrast": {
+          "type": "number",
+          "default": 0,
+          "minimum": -100,
+          "maximum": 100,
+          "markdownDescription": "Auto adjust: added to the Contrast Auto sets (−100 to 100)."
+        },
+        "polaroica.autoAdjust.highlights": {
+          "type": "number",
+          "default": 0,
+          "minimum": -100,
+          "maximum": 100,
+          "markdownDescription": "Auto adjust: added to the Highlights Auto sets (−100 to 100)."
+        },
+        "polaroica.autoAdjust.shadows": {
+          "type": "number",
+          "default": 0,
+          "minimum": -100,
+          "maximum": 100,
+          "markdownDescription": "Auto adjust: added to the Shadows Auto sets (−100 to 100)."
+        },
+        "polaroica.autoAdjust.whites": {
+          "type": "number",
+          "default": 0,
+          "minimum": -100,
+          "maximum": 100,
+          "markdownDescription": "Auto adjust: added to the Whites Auto sets (−100 to 100)."
+        },
+        "polaroica.autoAdjust.blacks": {
+          "type": "number",
+          "default": 0,
+          "minimum": -100,
+          "maximum": 100,
+          "markdownDescription": "Auto adjust: added to the Blacks Auto sets (−100 to 100)."
+        },
+        "polaroica.autoAdjust.temperature": {
+          "type": "number",
+          "default": 0,
+          "minimum": -100,
+          "maximum": 100,
+          "markdownDescription": "Auto adjust: added to the Temp Auto sets (−100 to 100). Positive is warmer (e.g. `10`), negative cooler."
+        },
+        "polaroica.autoAdjust.tint": {
+          "type": "number",
+          "default": 0,
+          "minimum": -100,
+          "maximum": 100,
+          "markdownDescription": "Auto adjust: added to the Tint Auto sets. Positive is more magenta, negative more green."
+        },
+        "polaroica.autoAdjust.vibrance": {
+          "type": "number",
+          "default": 0,
+          "minimum": -100,
+          "maximum": 100,
+          "markdownDescription": "Auto adjust: added to the Vibrance Auto sets (−100 to 100)."
+        },
+        "polaroica.autoAdjust.saturation": {
+          "type": "number",
+          "default": 0,
+          "minimum": -100,
+          "maximum": 100,
+          "markdownDescription": "Auto adjust: added to the Saturation Auto sets (−100 to 100)."
+        },
         "polaroica.export.quality": {
           "type": "number",
           "default": 90,

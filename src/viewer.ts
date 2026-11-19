@@ -33,6 +33,19 @@ type FromViewer =
 const STRIP_RADIUS = 6;
 
 /** Photo tabs: each opened photo gets its own tab; ← → browse the folder inside that tab. */
+const TWEAK_KEYS = ['exposure', 'contrast', 'highlights', 'shadows', 'whites', 'blacks', 'temperature', 'tint', 'vibrance', 'saturation'] as const;
+
+/** The Auto Adjust settings: amounts added on top of what Auto sets (all 0 by default). */
+function autoTweaks(): Record<string, number> {
+  const cfg = vscode.workspace.getConfiguration('polaroica.autoAdjust');
+  const out: Record<string, number> = {};
+  for (const k of TWEAK_KEYS) {
+    const v = Number(cfg.get<number>(k, 0));
+    if (Number.isFinite(v) && v) out[k] = v;
+  }
+  return out;
+}
+
 export class PhotoViewers implements vscode.Disposable {
   private readonly viewers = new Set<PhotoViewer>();
   /** Export (right-click → Export…), set by the extension. */
@@ -73,6 +86,12 @@ export class PhotoViewers implements vscode.Disposable {
       vscode.workspace.onDidChangeWorkspaceFolders(() => {
         for (const v of this.viewers) {
           v.panel.webview.options = { ...v.panel.webview.options, localResourceRoots: localRoots(context.extensionUri) };
+        }
+      }),
+      vscode.workspace.onDidChangeConfiguration((e) => {
+        if (e.affectsConfiguration('polaroica.autoAdjust')) {
+          const tweaks = autoTweaks();
+          for (const v of this.viewers) void post(v.panel.webview, { type: 'autoTweaks', tweaks });
         }
       }),
     );
@@ -233,6 +252,7 @@ class PhotoViewer {
       cull: cullMap.get(photo.name) ?? null,
       canPaste: !!this.owner.edits.clipboard,
       faces,
+      autoTweaks: autoTweaks(),
     });
 
     const work: Promise<unknown>[] = [

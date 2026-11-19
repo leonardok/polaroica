@@ -42,7 +42,7 @@
       panel.setCanPaste(true);
     },
     onPaste: () => post({ type: 'pasteEdits' }),
-    autoContext: () => (renderer && glName && current ? { sample: renderer.sample, faces: current.faces, raw: !!current.photo.raw } : undefined),
+    autoContext: () => (renderer && glName && current ? { sample: renderer.sample, faces: current.faces, raw: !!current.photo.raw, tweaks: current.autoTweaks } : undefined),
   });
 
   function adjustOpen() {
@@ -634,6 +634,9 @@
         break;
       case 'bytes':
         void receiveBytes(m);
+        break;
+      case 'autoTweaks':
+        if (current) current.autoTweaks = m.tweaks;
         break;
       case 'paste':
         undo.push(A.clone(committed));

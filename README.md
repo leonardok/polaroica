@@ -65,6 +65,8 @@ next to your photos).
   **Auto** (the wand) sets the Light and Color sliders for a balanced picture: it meters on faces
   found by Auto-Rank's People option (otherwise the middle of the frame), keeps night and snow
   scenes dark or bright, and corrects colour casts part of the way. You can fine-tune or undo it.
+  To add your own correction on top of every Auto (say, a little brighter and warmer), set the
+  amounts under **Settings › Polaroica › Auto Adjust**.
   Before / After, undo / redo, Reset, Copy / Paste settings. Edits are **non-destructive**: they
   are saved in the same `.sidecar` file and the photo is never changed. Edited photos show an
   orange dot.
@@ -145,7 +147,10 @@ display as a labelled placeholder.
 | `polaroica.backgroundThumbnails` | `false` | Build thumbnails for every library in the background at startup. Off: they are built as you open albums. |
 | `polaroica.autoRank.burstSeconds` | `2` | Auto-Rank: max seconds between frames of one burst. |
 | `polaroica.autoRank.sceneSeconds` | `60` | Auto-Rank: max seconds between shots of the same scene and framing that still stack (0 = bursts only). |
+| `polaroica.autoAdjust.*` | `0` | Auto adjust: your own correction added on top of every Auto (exposure, contrast, highlights, shadows, whites, blacks, temperature, tint, vibrance, saturation). |
 | `polaroica.export.quality` | `90` | JPEG quality of exports (50–100). |
+
+Every setting, with what it does and an example: [docs/settings.md](docs/settings.md).
 
 ## Known limitations
 
