@@ -1,6 +1,6 @@
 # Creates a GitHub release of the version in package.json, by hand: Actions tab → polaroica-build-release →
 # Run workflow (on main). It tests and packages the extension, then publishes
-# polaroica-<version>.vsix with docs/release-notes/v<version>.md as the release text, plus the
+# polaroica-extension-<version>.vsix with docs/release-notes/v<version>.md as the release text, plus the
 # file's SHA-256. Before running it: bump "version" in package.json and write the release notes.
 name: polaroica-build-release
 
@@ -45,8 +45,8 @@ jobs:
             echo "::error::$notes is missing. Write the release notes for ${version} first."
             exit 1
           fi
-          if git ls-remote --exit-code --tags origin "refs/tags/v${version}" > /dev/null; then
-            echo "::error::v${version} is already released. Bump the version in package.json first."
+          if git ls-remote --exit-code --tags origin "refs/tags/polaroica-extension-${version}" > /dev/null; then
+            echo "::error::polaroica-extension-${version} is already released. Bump the version in package.json first."
             exit 1
           fi
           echo "version=${version}" >> "$GITHUB_OUTPUT"
@@ -59,7 +59,7 @@ jobs:
         run: npm test
 
       - name: Package
-        run: npx --yes @vscode/vsce@3.2.1 package --out "polaroica-${{ steps.version.outputs.version }}.vsix"
+        run: npx --yes @vscode/vsce@3.2.1 package --out "polaroica-extension-${{ steps.version.outputs.version }}.vsix"
 
       - name: Create the release
         env:
@@ -68,14 +68,14 @@ jobs:
           NOTES: ${{ steps.version.outputs.notes }}
           DRAFT: ${{ inputs.draft }}
         run: |
-          vsix="polaroica-${VERSION}.vsix"
+          vsix="polaroica-extension-${VERSION}.vsix"
           sha=$(sha256sum "$vsix" | cut -d' ' -f1)
           { cat "$NOTES"; printf '\n`%s` SHA-256: `%s`\n' "$vsix" "$sha"; } > release-body.md
           flags=()
           if [ "$DRAFT" = "true" ]; then flags+=(--draft); fi
-          gh release create "v${VERSION}" "$vsix" \
-            --title "Polaroica ${VERSION}" \
+          gh release create "polaroica-extension-${VERSION}" "$vsix" \
+            --title "polaroica-extension-${VERSION}" \
             --notes-file release-body.md \
             --target "$GITHUB_SHA" \
             "${flags[@]}"
-          echo "Released v${VERSION} (${vsix}, SHA-256 ${sha})" >> "$GITHUB_STEP_SUMMARY"
+          echo "Released polaroica-extension-${VERSION} (${vsix}, SHA-256 ${sha})" >> "$GITHUB_STEP_SUMMARY"
