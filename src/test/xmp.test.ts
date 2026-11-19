@@ -19,6 +19,22 @@ test('edits round-trip through the XMP sidecar', () => {
   assert.ok(isDefault(fromXmp(toXmp(defaultEdits()))));
 });
 
+test('Clarity, Dehaze, Detail and Color round-trip and are range-checked', () => {
+  const e = defaultEdits();
+  Object.assign(e, { clarity: 25, dehaze: -10, sharpness: 40, noise: 30, moire: 15, defringe: 60, colorHue: 210, colorAmount: 35 });
+  const xml = toXmp(e);
+  assert.match(xml, /crs:Clarity2012="\+25"/);
+  assert.match(xml, /polaroica:Moire="\+15"/);
+  assert.deepEqual(fromXmp(xml), e);
+  const n = normalizeEdits({ noise: -40, colorHue: 400, colorAmount: 150, sharpness: -300 });
+  assert.equal(n.noise, 0);
+  assert.equal(n.colorHue, 359);
+  assert.equal(n.colorAmount, 100);
+  assert.equal(n.sharpness, -100);
+  // A hue with no strength is no edit.
+  assert.ok(isDefault(normalizeEdits({ colorHue: 120 })));
+});
+
 test('untrusted edits are clamped and cleaned', () => {
   const e = normalizeEdits({ exposure: 99, contrast: -500, shadows: 'x', curves: { rgb: [[300, -5], [0, 0], [0, 9], 'bad'] } });
   assert.equal(e.exposure, 5);

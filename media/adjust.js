@@ -11,11 +11,18 @@
     { id: 'shadows', label: 'Shadows', min: -100, max: 100, step: 1, group: 'light' },
     { id: 'whites', label: 'Whites', min: -100, max: 100, step: 1, group: 'light' },
     { id: 'blacks', label: 'Blacks', min: -100, max: 100, step: 1, group: 'light' },
-    // Older edits' relative temperature: still applied, but the panel shows Kelvin instead.
-    { id: 'temp', label: 'Temperature', min: -100, max: 100, step: 1, group: 'hidden' },
+    { id: 'temp', label: 'Temp', min: -100, max: 100, step: 1, group: 'color', track: 'linear-gradient(90deg, #4a7fd1, #e8e8e8 50%, #d9a54a)', title: 'Temperature: below 0 cooler, above 0 warmer' },
     { id: 'tint', label: 'Tint', min: -100, max: 100, step: 1, group: 'color', track: 'linear-gradient(90deg, #5cb85c, #c562c5)' },
     { id: 'vibrance', label: 'Vibrance', min: -100, max: 100, step: 1, group: 'color' },
     { id: 'saturation', label: 'Saturation', min: -100, max: 100, step: 1, group: 'color', track: 'linear-gradient(90deg, #7a7a7a, #d9534f)' },
+    { id: 'colorHue', label: 'Color', min: 0, max: 359, step: 1, group: 'tint', track: 'linear-gradient(90deg, #f00, #ff0 17%, #0f0 33%, #0ff 50%, #00f 67%, #f0f 83%, #f00)', title: 'Color: a tint laid over the picture · set its strength below' },
+    { id: 'colorAmount', label: 'Strength', min: 0, max: 100, step: 1, group: 'tint', title: 'How strongly the Color tint is laid over the picture' },
+    { id: 'clarity', label: 'Clarity', min: -100, max: 100, step: 1, group: 'presence', title: 'Local contrast in the mid tones' },
+    { id: 'dehaze', label: 'Dehaze', min: -100, max: 100, step: 1, group: 'presence', title: 'Removes (or adds) haze and fog' },
+    { id: 'sharpness', label: 'Sharpness', min: -100, max: 100, step: 1, group: 'detail', title: 'Sharpens fine detail · below 0 softens · view at 1:1 to judge' },
+    { id: 'noise', label: 'Noise', min: 0, max: 100, step: 1, group: 'detail', title: 'Smooths out grain in flat areas · view at 1:1 to judge' },
+    { id: 'moire', label: 'Moiré', min: 0, max: 100, step: 1, group: 'detail', title: 'Removes colour moiré and colour noise' },
+    { id: 'defringe', label: 'Defringe', min: 0, max: 100, step: 1, group: 'detail', title: 'Removes purple and green fringes along hard edges' },
   ];
   const CHANNELS = ['rgb', 'r', 'g', 'b'];
   const IDENTITY = () => [
@@ -114,20 +121,12 @@
     }
     return n ? kelvinOfRgb(r, b) : 6500;
   }
-  /** Kelvin that gives the same red / blue shift as an older edit's relative Temperature. */
-  function kelvinForLegacy(ref, temp) {
-    const want = Math.log((1 + 0.25 * temp / 100) / (1 - 0.25 * temp / 100));
-    let best = ref;
-    let err = Infinity;
-    for (let m = 1e6 / KELVIN_MAX; m <= 1e6 / KELVIN_MIN; m += 0.5) {
-      const g = kelvinGains(ref, 1e6 / m);
-      const d = Math.abs(Math.log(g[0] / g[2]) - want);
-      if (d < err) {
-        err = d;
-        best = 1e6 / m;
-      }
-    }
-    return roundKelvin(best);
+  /** The relative Temp (−100…100) that warms or cools as much as moving from `ref` K to `k` K. */
+  function tempOfKelvin(ref, k) {
+    if (!(ref > 0 && k > 0) || ref === k) return 0;
+    const g = kelvinGains(ref, k);
+    const q = g[0] / g[2];
+    return Math.round(clamp(((q - 1) / (q + 1) / 0.25) * 100, -100, 100));
   }
 
   // ---- Auto -------------------------------------------------------------------------------
@@ -214,7 +213,7 @@
    */
   function autoWhiteBalance(px, ref, raw, lowKey) {
     const total = px.length / 4;
-    const out = { kelvin: 0, kelvinRef: 0, tint: 0, gains: [1, 1, 1] };
+    const out = { temp: 0, tint: 0, gains: [1, 1, 1] };
     if (!(ref > 0)) return out;
     const usable = (i) => {
       const hi = Math.max(px[i], px[i + 1], px[i + 2]);
@@ -265,10 +264,8 @@
     const cap = raw ? 30 : 60; // mired
     const shift = clamp(strength * (1e6 / neutral - 1e6 / ref), -cap, cap);
     if (Math.abs(shift) >= 6) {
-      out.kelvin = roundKelvin(1e6 / (1e6 / ref + shift));
-      out.kelvinRef = ref;
+      out.temp = tempOfKelvin(ref, roundKelvin(1e6 / (1e6 / ref + shift)));
     }
-    if (out.kelvin === ref) out.kelvin = out.kelvinRef = 0;
     // Green / magenta: what is left once the warm / cool cast is fully gone. A scene that is
     // green all over (a forest, a lawn) is left alone.
     const kg = kelvinGains(ref, neutral);
@@ -277,7 +274,7 @@
     const gain = 1 + 0.6 * strength * (1 / green - 1); // tint moves green by 1 - 0.18 * tint/100
     out.tint = greenScene ? 0 : Math.round(clamp(((1 - gain) / 0.18) * 100, -10, 10));
     if (Math.abs(out.tint) < 4) out.tint = 0;
-    out.gains = wbGains({ temp: 0, tint: out.tint, kelvin: out.kelvin, kelvinRef: out.kelvinRef });
+    out.gains = wbGains({ temp: out.temp, tint: out.tint, kelvin: 0, kelvinRef: 0 });
     return out;
   }
 
@@ -463,12 +460,28 @@
       shadows: Math.round(s.shadows),
       whites: Math.round(s.whites),
       blacks: Math.round(s.blacks),
-      temp: 0,
-      kelvin: wb.kelvin,
-      kelvinRef: wb.kelvinRef,
+      temp: wb.temp,
+      kelvin: 0,
+      kelvinRef: 0,
       tint: wb.tint,
       vibrance,
     };
+  }
+
+  /**
+   * Your own corrections (Settings › Polaroica › Auto Adjust) added on top of what Auto set, each
+   * kept within its slider's range. `temperature` is added to Temp (−100…100).
+   */
+  function withTweaks(e, tweaks) {
+    if (!tweaks) return e;
+    const out = clone(e);
+    for (const s of SLIDERS) {
+      if (s.group === 'hidden' || !tweaks[s.id]) continue;
+      const v = clamp(out[s.id] + tweaks[s.id], s.min, s.max);
+      out[s.id] = s.id === 'exposure' ? Math.round(v * 20) / 20 : Math.round(v);
+    }
+    if (tweaks.temperature) out.temp = Math.round(clamp(out.temp + tweaks.temperature, -100, 100));
+    return out;
   }
 
   function clone(e) {
@@ -477,7 +490,7 @@
 
   function isDefault(e) {
     const idCurve = (c) => c.length === 2 && c[0][0] === 0 && c[0][1] === 0 && c[1][0] === 255 && c[1][1] === 255;
-    return SLIDERS.every((s) => !e[s.id]) && !hasKelvin(e) && CHANNELS.every((k) => idCurve(e.curves[k]));
+    return SLIDERS.every((s) => s.id === 'colorHue' || !e[s.id]) && !hasKelvin(e) && CHANNELS.every((k) => idCurve(e.curves[k]));
   }
 
   function same(a, b) {
@@ -560,6 +573,116 @@
     return out;
   }
 
+  // ---- Clarity / Dehaze maps (same as toneMaps() in src/core/develop.ts) -------------------
+
+  const MAP_SIDE = 384;
+  const LOG_EPS = 1 / 1024;
+
+  function gaussBlur(src, w, hh, sigma) {
+    const r = Math.ceil(sigma * 3);
+    const k = new Float32Array(2 * r + 1);
+    let ks = 0;
+    for (let i = -r; i <= r; i++) ks += k[i + r] = Math.exp(-(i * i) / (2 * sigma * sigma));
+    for (let i = 0; i < k.length; i++) k[i] /= ks;
+    const tmp = new Float32Array(w * hh);
+    const out = new Float32Array(w * hh);
+    for (let y = 0; y < hh; y++) {
+      for (let x = 0; x < w; x++) {
+        let a = 0;
+        for (let i = -r; i <= r; i++) a += k[i + r] * src[y * w + clamp(x + i, 0, w - 1)];
+        tmp[y * w + x] = a;
+      }
+    }
+    for (let y = 0; y < hh; y++) {
+      for (let x = 0; x < w; x++) {
+        let a = 0;
+        for (let i = -r; i <= r; i++) a += k[i + r] * tmp[clamp(y + i, 0, hh - 1) * w + x];
+        out[y * w + x] = a;
+      }
+    }
+    return out;
+  }
+
+  function minFilter(src, w, hh, r) {
+    const tmp = new Float32Array(w * hh);
+    const out = new Float32Array(w * hh);
+    for (let y = 0; y < hh; y++) {
+      for (let x = 0; x < w; x++) {
+        let m = Infinity;
+        for (let i = -r; i <= r; i++) m = Math.min(m, src[y * w + clamp(x + i, 0, w - 1)]);
+        tmp[y * w + x] = m;
+      }
+    }
+    for (let y = 0; y < hh; y++) {
+      for (let x = 0; x < w; x++) {
+        let m = Infinity;
+        for (let i = -r; i <= r; i++) m = Math.min(m, tmp[clamp(y + i, 0, hh - 1) * w + x]);
+        out[y * w + x] = m;
+      }
+    }
+    return out;
+  }
+
+  /**
+   * What Clarity and Dehaze need, once per photo, from a small copy: the blurred log2 luminance
+   * (`base`), how much of the scene shows through the haze (`trans`, dark channel prior) and the
+   * haze's colour (`air`, linear).
+   */
+  function toneMaps(bitmap) {
+    const s = Math.min(1, MAP_SIDE / Math.max(bitmap.width, bitmap.height));
+    const w = Math.max(1, Math.round(bitmap.width * s));
+    const hh = Math.max(1, Math.round(bitmap.height * s));
+    const ctx = new OffscreenCanvas(w, hh).getContext('2d');
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(bitmap, 0, 0, w, hh);
+    const d = ctx.getImageData(0, 0, w, hh).data;
+    const n = w * hh;
+    const R = new Float32Array(n);
+    const G = new Float32Array(n);
+    const B = new Float32Array(n);
+    const logY = new Float32Array(n);
+    const m = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      R[i] = LIN[d[i * 4]];
+      G[i] = LIN[d[i * 4 + 1]];
+      B[i] = LIN[d[i * 4 + 2]];
+      logY[i] = Math.log2(0.2126 * R[i] + 0.7152 * G[i] + 0.0722 * B[i] + LOG_EPS);
+      m[i] = Math.min(R[i], G[i], B[i]);
+    }
+    const base = gaussBlur(logY, w, hh, 3);
+    const dark = minFilter(m, w, hh, 2);
+    const sorted = Float32Array.from(dark).sort();
+    const cut = sorted[n - Math.max(1, Math.floor(n * 0.001))];
+    const air = [0, 0, 0];
+    let k = 0;
+    for (let i = 0; i < n; i++) {
+      if (dark[i] >= cut) {
+        air[0] += R[i];
+        air[1] += G[i];
+        air[2] += B[i];
+        k++;
+      }
+    }
+    for (let c = 0; c < 3; c++) air[c] = Math.max(0.05, air[c] / k);
+    for (let i = 0; i < n; i++) m[i] = Math.min(R[i] / air[0], G[i] / air[1], B[i] / air[2]);
+    const dn = minFilter(m, w, hh, 2);
+    for (let i = 0; i < n; i++) dn[i] = 1 - 0.95 * dn[i];
+    const trans = gaussBlur(dn, w, hh, 1.5);
+    const rgba = new Float32Array(n * 4);
+    for (let i = 0; i < n; i++) {
+      rgba[i * 4] = base[i];
+      rgba[i * 4 + 1] = clamp(trans[i], 0, 1);
+      rgba[i * 4 + 3] = 1;
+    }
+    return { width: w, height: hh, rgba, air };
+  }
+
+  /** The Color tint's colour at full strength (hue 0–359). */
+  function tintColor(hue) {
+    const x = (((hue % 360) + 360) % 360) / 360;
+    return [clamp(Math.abs(x * 6 - 3) - 1, 0, 1), clamp(2 - Math.abs(x * 6 - 2), 0, 1), clamp(2 - Math.abs(x * 6 - 4), 0, 1)];
+  }
+
   // ---- WebGL renderer -------------------------------------------------------------------
 
   const VERT = `#version 300 es
@@ -576,9 +699,12 @@ in vec2 v_uv;
 out vec4 o;
 uniform sampler2D u_img;
 uniform sampler2D u_lut;
+uniform sampler2D u_maps; // r: blurred log2 luminance, g: haze transmission
 uniform float u_exp, u_con, u_hi, u_sh, u_wh, u_bl, u_vib, u_sat;
-uniform vec3 u_wb;
-uniform int u_bypass;
+uniform float u_cla, u_dhz, u_shp, u_nr, u_moire, u_fringe, u_tamt;
+uniform vec3 u_wb, u_air, u_tint;
+uniform vec2 u_texel;
+uniform int u_bypass, u_detail;
 vec3 toLin(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
 vec3 toSrgb(vec3 c) { c = max(c, 0.0); return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
 float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
@@ -586,12 +712,75 @@ float curve(float x, int ch) {
   vec4 t = texture(u_lut, vec2(clamp(x, 0.0, 1.0) * (255.0 / 256.0) + 0.5 / 256.0, 0.5));
   return ch == 0 ? t.r : (ch == 1 ? t.g : t.b);
 }
+// Sharpness, Noise, Moiré and Defringe from the 5x5 neighbourhood (detailStage() in develop.ts).
+vec3 detail(vec2 uv, vec3 c) {
+  float yc = luma(c);
+  float sr = 0.02 + 0.1 * u_nr;
+  vec3 sg = vec3(0.0), sb = vec3(0.0);
+  float wg = 0.0, wb = 0.0, ymin = yc, ymax = yc;
+  for (int j = -2; j <= 2; j++) {
+    for (int i = -2; i <= 2; i++) {
+      vec3 q = texture(u_img, uv + vec2(float(i), float(j)) * u_texel).rgb;
+      float d2 = float(i * i + j * j);
+      float yq = luma(q);
+      float w1 = exp(-d2 / 2.0);
+      sg += q * w1; wg += w1;
+      float w2 = exp(-d2 / 4.5) * exp(-(yq - yc) * (yq - yc) / (2.0 * sr * sr));
+      sb += q * w2; wb += w2;
+      ymin = min(ymin, yq); ymax = max(ymax, yq);
+    }
+  }
+  vec3 G = sg / wg;
+  vec3 r = u_nr > 0.0 ? mix(c, sb / wb, u_nr) : c;
+  if (u_moire > 0.0) {
+    vec3 sm = vec3(0.0);
+    float wm = 0.0;
+    for (int j = -2; j <= 2; j++) {
+      for (int i = -2; i <= 2; i++) {
+        vec3 q = texture(u_img, uv + vec2(float(i), float(j)) * 2.0 * u_texel).rgb;
+        float w1 = exp(-float(i * i + j * j) / 2.0);
+        sm += (q - luma(q)) * w1; wm += w1;
+      }
+    }
+    float l = luma(r);
+    r = l + mix(r - l, sm / wm, u_moire);
+  }
+  if (u_fringe > 0.0) {
+    float edge = smoothstep(0.1, 0.35, ymax - ymin);
+    float purple = smoothstep(0.02, 0.1, min(r.r - r.g, r.b - r.g));
+    float green = smoothstep(0.02, 0.1, min(r.g - r.r, r.g - r.b));
+    r = mix(r, vec3(luma(r)), u_fringe * edge * max(purple, green));
+  }
+  if (u_shp > 0.0) r += (yc - luma(G)) * u_shp * 1.5;
+  else if (u_shp < 0.0) r = mix(r, G, -u_shp);
+  return clamp(r, 0.0, 1.0);
+}
+// The Color tint: its hue at this brightness (W3C ClipColor keeps it in range).
+vec3 tinted(vec3 g) {
+  vec3 c = u_tint + (luma(g) - luma(u_tint));
+  float l = luma(c), n = min(c.r, min(c.g, c.b)), x = max(c.r, max(c.g, c.b));
+  if (n < 0.0) c = l + (c - l) * l / max(l - n, 1e-6);
+  if (x > 1.0) c = l + (c - l) * (1.0 - l) / max(x - l, 1e-6);
+  return mix(g, c, u_tamt);
+}
 void main() {
   vec4 s = texture(u_img, v_uv);
   if (u_bypass == 1) { o = s; return; }
+  vec3 src = u_detail == 1 ? detail(v_uv, s.rgb) : s.rgb;
+  vec3 c = toLin(src);
+  // Clarity: how far this pixel stands out from the large shapes around it (log2 luminance).
+  vec4 mp = texture(u_maps, v_uv);
+  float dd = clamp(log2(luma(c) + 0.0009765625) - mp.r, -2.0, 2.0);
+  // Dehaze (dark channel prior): take out the haze, or lay more of it on.
+  if (u_dhz > 0.0) c = max((c - u_air) / max(1.0 - u_dhz * (1.0 - mp.g), 0.2) + u_air, 0.0);
+  else if (u_dhz < 0.0) c = mix(c, u_air, -u_dhz * 0.5);
   // Exposure and white balance in linear light.
-  vec3 c = toLin(s.rgb) * exp2(u_exp);
+  c *= exp2(u_exp);
   c *= u_wb;
+  if (u_cla != 0.0) {
+    float lm = clamp(toSrgb(vec3(luma(c))).r, 0.0, 1.0);
+    c *= exp2(clamp(u_cla * 0.8 * dd * 4.0 * lm * (1.0 - lm), -1.5, 1.5));
+  }
   vec3 g = toSrgb(c);
   // Whites / blacks move the end points.
   float bp = -0.12 * u_bl;
@@ -612,7 +801,8 @@ void main() {
   float l = luma(g);
   float sat = max(g.r, max(g.g, g.b)) - min(g.r, min(g.g, g.b));
   float k = 1.0 + u_sat + u_vib * (1.0 - sat);
-  g = l + (g - l) * max(k, 0.0);
+  g = clamp(l + (g - l) * max(k, 0.0), 0.0, 1.0);
+  if (u_tamt > 0.0) g = tinted(g);
   o = vec4(clamp(g, 0.0, 1.0), s.a);
 }`;
 
@@ -650,13 +840,17 @@ void main() {
       gl.enableVertexAttribArray(loc);
       gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
       this.u = {};
-      for (const n of ['u_img', 'u_lut', 'u_exp', 'u_con', 'u_hi', 'u_sh', 'u_wh', 'u_bl', 'u_wb', 'u_vib', 'u_sat', 'u_bypass']) {
+      for (const n of ['u_img', 'u_lut', 'u_maps', 'u_exp', 'u_con', 'u_hi', 'u_sh', 'u_wh', 'u_bl', 'u_wb', 'u_vib', 'u_sat', 'u_bypass', 'u_cla', 'u_dhz', 'u_shp', 'u_nr', 'u_moire', 'u_fringe', 'u_tamt', 'u_air', 'u_tint', 'u_texel', 'u_detail']) {
         this.u[n] = gl.getUniformLocation(prog, n);
       }
       this.imgTex = this.texture(0);
       this.lutTex = this.texture(1);
+      this.mapTex = this.texture(3); // unit 2 is the histogram's render target
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, 1, 1, 0, gl.RGBA, gl.FLOAT, new Float32Array([0, 1, 0, 1]));
       gl.uniform1i(this.u.u_img, 0);
       gl.uniform1i(this.u.u_lut, 1);
+      gl.uniform1i(this.u.u_maps, 3);
+      gl.uniform3fv(this.u.u_air, [1, 1, 1]);
       this.maxSize = gl.getParameter(gl.MAX_TEXTURE_SIZE);
       this.width = 0;
       this.height = 0;
@@ -692,6 +886,13 @@ void main() {
       this.width = src.width;
       this.height = src.height;
       this.sample = samplePixels(src);
+      const maps = toneMaps(src);
+      gl.useProgram(this.prog);
+      gl.activeTexture(gl.TEXTURE3);
+      gl.bindTexture(gl.TEXTURE_2D, this.mapTex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, maps.width, maps.height, 0, gl.RGBA, gl.FLOAT, maps.rgba);
+      gl.uniform3fv(this.u.u_air, maps.air);
+      gl.uniform2f(this.u.u_texel, 1 / src.width, 1 / src.height);
       if (src !== bitmap) src.close();
     }
 
@@ -707,6 +908,15 @@ void main() {
       gl.uniform3fv(this.u.u_wb, wbGains(e));
       gl.uniform1f(this.u.u_vib, e.vibrance / 100);
       gl.uniform1f(this.u.u_sat, e.saturation / 100);
+      gl.uniform1f(this.u.u_cla, (e.clarity || 0) / 100);
+      gl.uniform1f(this.u.u_dhz, (e.dehaze || 0) / 100);
+      gl.uniform1f(this.u.u_shp, (e.sharpness || 0) / 100);
+      gl.uniform1f(this.u.u_nr, (e.noise || 0) / 100);
+      gl.uniform1f(this.u.u_moire, (e.moire || 0) / 100);
+      gl.uniform1f(this.u.u_fringe, (e.defringe || 0) / 100);
+      gl.uniform1i(this.u.u_detail, e.sharpness || e.noise || e.moire || e.defringe ? 1 : 0);
+      gl.uniform1f(this.u.u_tamt, ((e.colorAmount || 0) / 100) * 0.6);
+      gl.uniform3fv(this.u.u_tint, tintColor(e.colorHue || 0));
       gl.activeTexture(gl.TEXTURE1);
       gl.bindTexture(gl.TEXTURE_2D, this.lutTex);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 256, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, lutBytes(e.curves));
@@ -781,10 +991,11 @@ void main() {
         max: String(s.max),
         step: String(s.step),
         'aria-label': s.label,
-        title: 'Double-click to reset',
+        title: (s.title ? s.title + ' · ' : '') + 'Double-click to reset',
         oninput: (e) => {
           edits = { ...edits, [s.id]: Number(e.target.value) };
           paintValue(s, value, edits[s.id]);
+          if (s.group === 'tint') paintTint();
           opts.onChange(clone(edits), false);
         },
         onchange: () => opts.onChange(clone(edits), true),
@@ -802,71 +1013,36 @@ void main() {
     };
 
     const paintValue = (s, el, v) => {
-      el.textContent = (v > 0 ? '+' : '') + (s.id === 'exposure' ? Number(v).toFixed(2) : String(Math.round(v)));
+      if (s.id === 'colorHue') {
+        el.textContent = `${Math.round(v)}°`;
+        el.classList.toggle('zero', !edits.colorAmount);
+        return;
+      }
+      el.textContent = (v > 0 && s.min < 0 ? '+' : '') + (s.id === 'exposure' ? Number(v).toFixed(2) : String(Math.round(v)));
       el.classList.toggle('zero', !v);
     };
+    /** The Strength track fades into the chosen colour; the hue reads as off while Strength is 0. */
+    const paintTint = () => {
+      const c = tintColor(edits.colorHue || 0).map((v) => Math.round(v * 255));
+      if (rows.colorAmount) rows.colorAmount.input.style.setProperty('--track', `linear-gradient(90deg, #7a7a7a, rgb(${c.join(',')}))`);
+      if (rows.colorHue) paintValue(rows.colorHue.spec, rows.colorHue.value, edits.colorHue);
+    };
 
-    // Temperature in Kelvin, from the photo's own: as shot (RAW) or estimated (JPEG). The slider
-    // moves in even steps of mired (1e6 / K), as the eye sees warmth change.
+    // The photo's own temperature (as shot for RAW, estimated for JPEG): what Auto balances from.
     let ref; // { kelvin, source: 'camera' | 'estimated' }
-    const kValue = h('span', { class: 'adj-value' });
-    const kInput = h('input', {
-      type: 'range',
-      id: 'adj-kelvin',
-      min: String(-1e6 / KELVIN_MIN),
-      max: String(-1e6 / KELVIN_MAX),
-      step: '0.1',
-      'aria-label': 'Temperature (Kelvin)',
-      oninput: (e) => {
-        if (!ref) return;
-        const k = roundKelvin(-1e6 / Number(e.target.value));
-        edits = k === ref.kelvin ? { ...edits, kelvin: 0, kelvinRef: 0 } : { ...edits, kelvin: k, kelvinRef: ref.kelvin };
-        paintKelvin(false);
-        opts.onChange(clone(edits), false);
-      },
-      onchange: () => opts.onChange(clone(edits), true),
-      ondblclick: () => {
-        edits = { ...edits, kelvin: 0, kelvinRef: 0, temp: 0 };
-        paintKelvin(true);
-        opts.onChange(clone(edits), true);
-      },
-    });
-    kInput.style.setProperty('--track', 'linear-gradient(90deg, #4a7fd1, #e8e8e8 45%, #d9a54a)');
-    const kRow = h('div', { class: 'adj-row' }, h('label', { for: 'adj-kelvin', title: 'Temperature (white balance)' }, 'Temp'), kInput, kValue);
-    const fmtK = (k) => `${k.toLocaleString('en-US')} K`;
-    function paintKelvin(moveThumb) {
-      const k = hasKelvin(edits) ? edits.kelvin : ref ? ref.kelvin : 0;
-      kInput.disabled = !ref;
-      if (moveThumb && k) kInput.value = String(-1e6 / k);
-      kValue.textContent = k ? (ref && ref.source === 'estimated' && !hasKelvin(edits) ? '≈' : '') + fmtK(k) : '—';
-      kValue.classList.toggle('zero', !hasKelvin(edits));
-      const own = ref ? (ref.source === 'camera' ? `As shot: ${fmtK(ref.kelvin)}` : `Estimated from the picture: ${fmtK(ref.kelvin)}`) : 'Reading the photo’s white balance…';
-      const title = `${own} · lower is cooler, higher is warmer · double-click for ${ref && ref.source === 'camera' ? 'as shot' : 'the photo’s own'}`;
-      kInput.title = title;
-      kValue.title = title;
-    }
-    /** Edits made elsewhere, put in terms of this photo's own temperature. */
+    /** A Kelvin white balance (older edits, or pasted from one) becomes the relative Temp. */
     function adopt() {
-      if (!ref) return false;
-      if (edits.temp) {
-        // An older relative Temperature: the Kelvin value that warms or cools the same amount.
-        const k = kelvinForLegacy(ref.kelvin, edits.temp);
-        edits = { ...edits, temp: 0, kelvin: k === ref.kelvin ? 0 : k, kelvinRef: k === ref.kelvin ? 0 : ref.kelvin };
-        return true;
-      }
-      if (hasKelvin(edits) && edits.kelvinRef !== ref.kelvin) {
-        // Pasted from another photo, or the estimate moved: keep the Kelvin value, re-base it.
-        edits = edits.kelvin === ref.kelvin ? { ...edits, kelvin: 0, kelvinRef: 0 } : { ...edits, kelvinRef: ref.kelvin };
-        return true;
-      }
-      return false;
+      if (!hasKelvin(edits)) return false;
+      const t = clamp((edits.temp || 0) + tempOfKelvin(edits.kelvinRef, edits.kelvin), -100, 100);
+      edits = { ...edits, temp: t, kelvin: 0, kelvinRef: 0 };
+      return true;
     }
 
     const iconBtn = (name, label, title, onclick) => h('button', { class: 'icon-btn', 'aria-label': label, title, onclick }, icon(name));
-    const autoBtn = iconBtn('wand', 'Auto', 'Auto: set Light and Color for a balanced picture (you can fine-tune or undo it)', () => {
+    const autoBtn = iconBtn('wand', 'Auto', 'Auto: set Light and Color for a balanced picture (you can fine-tune or undo it). Settings › Polaroica › Auto Adjust adds your own corrections on top.', () => {
       const c = opts.autoContext && opts.autoContext();
       if (!c || !c.sample) return;
-      edits = autoEdits(c.sample, ref ? ref.kelvin : 0, edits, c);
+      edits = withTweaks(autoEdits(c.sample, ref ? ref.kelvin : 0, edits, c), c.tweaks);
       set(edits);
       opts.onChange(clone(edits), true);
     });
@@ -893,24 +1069,25 @@ void main() {
       ),
       h('div', { class: 'adj-block' }, histCanvas),
       h('div', { class: 'adj-block' }, h('div', { class: 'adj-title' }, 'LIGHT'), ...SLIDERS.filter((s) => s.group === 'light').map(sliderRow)),
-      h('div', { class: 'adj-block' }, h('div', { class: 'adj-title' }, 'COLOR'), kRow, ...SLIDERS.filter((s) => s.group === 'color').map(sliderRow)),
+      h('div', { class: 'adj-block' }, h('div', { class: 'adj-title' }, 'COLOR'), ...SLIDERS.filter((s) => s.group === 'color' || s.group === 'tint').map(sliderRow)),
+      h('div', { class: 'adj-block' }, h('div', { class: 'adj-title' }, 'PRESENCE'), ...SLIDERS.filter((s) => s.group === 'presence').map(sliderRow)),
+      h('div', { class: 'adj-block' }, h('div', { class: 'adj-title' }, 'DETAIL'), ...SLIDERS.filter((s) => s.group === 'detail').map(sliderRow)),
     );
 
     function set(e) {
       edits = clone(e);
+      const converted = adopt();
       for (const id of Object.keys(rows)) {
         rows[id].input.value = String(edits[id]);
         paintValue(rows[id].spec, rows[id].value, edits[id]);
       }
-      if (adopt()) opts.onChange(clone(edits), false);
-      paintKelvin(true);
+      paintTint();
+      if (converted) opts.onChange(clone(edits), false);
     }
 
     /** The photo's own temperature ({ kelvin, source }), or undefined while it is not known yet. */
     function setReference(r) {
       ref = r && r.kelvin > 0 ? { kelvin: roundKelvin(r.kelvin), source: r.source } : undefined;
-      if (adopt()) opts.onChange(clone(edits), false);
-      paintKelvin(true);
     }
 
     function drawHistogram(hist) {
@@ -961,5 +1138,5 @@ void main() {
     };
   }
 
-  window.polaroicaAdjust = { defaults, clone, isDefault, same, createPanel, Renderer, curveTable, estimateKelvin, autoEdits };
+  window.polaroicaAdjust = { defaults, clone, isDefault, same, createPanel, Renderer, curveTable, estimateKelvin, autoEdits, withTweaks };
 })();

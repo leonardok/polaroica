@@ -29,11 +29,48 @@ export interface Edits {
   tint: number;
   vibrance: number;
   saturation: number;
+  clarity: number; // -100..100, local contrast
+  dehaze: number; // -100..100
+  sharpness: number; // -100..100 (below 0 softens)
+  noise: number; // 0..100, luminance noise reduction
+  moire: number; // 0..100, colour moiré / colour noise
+  defringe: number; // 0..100, purple / green fringes at edges
+  colorHue: number; // 0..359, the Color tint's hue
+  colorAmount: number; // 0..100, how strongly the Color tint is laid over the picture
   curves: Curves;
 }
 
-export const SLIDERS = ['exposure', 'contrast', 'highlights', 'shadows', 'whites', 'blacks', 'temp', 'tint', 'vibrance', 'saturation'] as const;
+export const SLIDERS = [
+  'exposure',
+  'contrast',
+  'highlights',
+  'shadows',
+  'whites',
+  'blacks',
+  'temp',
+  'tint',
+  'vibrance',
+  'saturation',
+  'clarity',
+  'dehaze',
+  'sharpness',
+  'noise',
+  'moire',
+  'defringe',
+  'colorHue',
+  'colorAmount',
+] as const;
 export type Slider = (typeof SLIDERS)[number];
+
+/** Each slider's range: most are -100..100. */
+export const SLIDER_RANGE: Partial<Record<Slider, [number, number]>> = {
+  exposure: [-5, 5],
+  noise: [0, 100],
+  moire: [0, 100],
+  defringe: [0, 100],
+  colorHue: [0, 359],
+  colorAmount: [0, 100],
+};
 
 const IDENTITY: CurvePoint[] = [
   [0, 0],
@@ -54,6 +91,14 @@ export function defaultEdits(): Edits {
     tint: 0,
     vibrance: 0,
     saturation: 0,
+    clarity: 0,
+    dehaze: 0,
+    sharpness: 0,
+    noise: 0,
+    moire: 0,
+    defringe: 0,
+    colorHue: 0,
+    colorAmount: 0,
     curves: { rgb: [...IDENTITY], r: [...IDENTITY], g: [...IDENTITY], b: [...IDENTITY] },
   };
 }
@@ -63,7 +108,8 @@ function isIdentity(c: CurvePoint[]): boolean {
 }
 
 export function isDefault(e: Edits): boolean {
-  return SLIDERS.every((k) => e[k] === 0) && !hasKelvin(e) && (['rgb', 'r', 'g', 'b'] as const).every((k) => isIdentity(e.curves[k]));
+  // The Color tint's hue does nothing while its amount is 0.
+  return SLIDERS.every((k) => k === 'colorHue' || e[k] === 0) && !hasKelvin(e) && (['rgb', 'r', 'g', 'b'] as const).every((k) => isIdentity(e.curves[k]));
 }
 
 /** A Kelvin white balance that differs from the photo's own. */
@@ -86,8 +132,8 @@ export function normalizeEdits(raw: unknown): Edits {
   for (const k of SLIDERS) {
     const v = Number(r[k]);
     if (Number.isFinite(v)) {
-      const lim = k === 'exposure' ? 5 : 100;
-      e[k] = Math.max(-lim, Math.min(lim, k === 'exposure' ? Math.round(v * 100) / 100 : Math.round(v)));
+      const [lo, hi] = SLIDER_RANGE[k] ?? [-100, 100];
+      e[k] = Math.max(lo, Math.min(hi, k === 'exposure' ? Math.round(v * 100) / 100 : Math.round(v)));
     }
   }
   e.kelvin = kelvinOf(r.kelvin);
@@ -117,17 +163,27 @@ function clamp255(n: number): number {
   return Math.max(0, Math.min(255, Math.round(Number(n))));
 }
 
+// Camera Raw names where the slider means the same thing; our own otherwise (Camera Raw's
+// Sharpness is 0–150 and Moiré / Defringe / Color only exist there as local adjustments).
 const SLIDER_TAGS: Record<Slider, string> = {
-  exposure: 'Exposure2012',
-  contrast: 'Contrast2012',
-  highlights: 'Highlights2012',
-  shadows: 'Shadows2012',
-  whites: 'Whites2012',
-  blacks: 'Blacks2012',
-  temp: 'IncrementalTemperature',
-  tint: 'IncrementalTint',
-  vibrance: 'Vibrance',
-  saturation: 'Saturation',
+  exposure: 'crs:Exposure2012',
+  contrast: 'crs:Contrast2012',
+  highlights: 'crs:Highlights2012',
+  shadows: 'crs:Shadows2012',
+  whites: 'crs:Whites2012',
+  blacks: 'crs:Blacks2012',
+  temp: 'crs:IncrementalTemperature',
+  tint: 'crs:IncrementalTint',
+  vibrance: 'crs:Vibrance',
+  saturation: 'crs:Saturation',
+  clarity: 'crs:Clarity2012',
+  dehaze: 'crs:Dehaze',
+  sharpness: 'polaroica:Sharpness',
+  noise: 'crs:LuminanceSmoothing',
+  moire: 'polaroica:Moire',
+  defringe: 'polaroica:Defringe',
+  colorHue: 'polaroica:ColorHue',
+  colorAmount: 'polaroica:ColorAmount',
 };
 
 const CURVE_TAGS: Record<keyof Curves, string> = {
@@ -177,7 +233,7 @@ export function toXmp(input: Edits | Sidecar): string {
   const sc: Sidecar = 'edits' in input ? input : { ...emptySidecar(), edits: input };
   const e = sc.edits;
   const attrs = [
-    ...SLIDERS.map((k) => `   crs:${SLIDER_TAGS[k]}="${signed(e[k], k === 'exposure' ? 2 : 0)}"`),
+    ...SLIDERS.map((k) => `   ${SLIDER_TAGS[k]}="${signed(e[k], k === 'exposure' ? 2 : 0)}"`),
     // Kelvin, as Camera Raw writes it, plus the temperature it was set against.
     ...(hasKelvin(e) ? [`   crs:Temperature="${e.kelvin}"`, `   polaroica:TemperatureRef="${e.kelvinRef}"`] : []),
   ].join('\n');
@@ -224,7 +280,7 @@ export function fromXmp(text: string): Edits {
 export function readSidecar(text: string): Sidecar {
   const raw: Record<string, unknown> = {};
   for (const k of SLIDERS) {
-    const m = new RegExp(`crs:${SLIDER_TAGS[k]}\\s*=\\s*"([^"]*)"`).exec(text);
+    const m = new RegExp(`${SLIDER_TAGS[k]}\\s*=\\s*"([^"]*)"`).exec(text);
     if (m) {
       raw[k] = parseFloat(m[1]);
     }

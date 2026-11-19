@@ -59,8 +59,9 @@ next to your photos).
   bar (with optional auto-advance).
 - **Culling**: Pick, Reject and 0–5 stars. Ratings are saved in `.sidecar/<photo>.xmp` next to the
   photo; flagging never moves or deletes anything.
-- **Adjust**: histogram, Exposure, Contrast, Highlights, Shadows, Whites, Blacks, Temperature (in
-  Kelvin, starting from the photo's own), Tint, Vibrance and Saturation, drawn live with WebGL.
+- **Adjust**: histogram, Exposure, Contrast, Highlights, Shadows, Whites, Blacks, Temp, Tint,
+  Vibrance, Saturation, a Color tint, Clarity, Dehaze, Sharpness, Noise, Moiré and Defringe, drawn
+  live with WebGL.
   **Auto** (the wand) sets the Light and Color sliders for a balanced picture: it meters on faces
   found by Auto-Rank's People option (otherwise the middle of the frame), keeps night and snow
   scenes dark or bright, and corrects colour casts part of the way. You can fine-tune or undo it.

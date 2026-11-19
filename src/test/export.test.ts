@@ -71,6 +71,46 @@ test('develop: no adjustments leave pixels alone; exposure and curves act like t
   assert.equal(g2.data[0], 170);
 });
 
+test('develop: Clarity, Dehaze, detail sliders and Color change pixels the way they should', () => {
+  // A soft grey picture with a fine checker in the middle and a haze-like veil.
+  const w = 48;
+  const h = 48;
+  const pic = () => {
+    const data = new Uint8ClampedArray(w * h * 4);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = (y * w + x) * 4;
+        const v = 140 + ((x + y) % 2 ? 12 : -12) + Math.round((x / w) * 40);
+        data[i] = v + 10;
+        data[i + 1] = v;
+        data[i + 2] = v + 20;
+        data[i + 3] = 255;
+      }
+    }
+    return { data, width: w, height: h };
+  };
+  const spread = (d: ArrayLike<number>) => {
+    let s = 0;
+    for (let i = 4; i < d.length; i += 4) s += Math.abs(d[i + 1] - d[i - 3]);
+    return s;
+  };
+  const base = pic();
+  const plain = spread(base.data);
+  const sharp = applyEdits(pic(), { ...defaultEdits(), sharpness: 80 });
+  const soft = applyEdits(pic(), { ...defaultEdits(), noise: 100 });
+  assert.ok(spread(sharp.data) > plain * 1.2, 'sharpening adds pixel-to-pixel contrast');
+  assert.ok(spread(soft.data) < plain * 0.8, 'noise reduction smooths it');
+  const clear = applyEdits(pic(), { ...defaultEdits(), dehaze: 80 });
+  assert.ok(mean(clear.data) !== mean(base.data), 'dehaze changes the picture');
+  // Color: a strong blue tint makes blue the strongest channel.
+  const tinted = applyEdits(pic(), { ...defaultEdits(), colorHue: 240, colorAmount: 100 });
+  assert.ok(tinted.data[2] > tinted.data[0] + 20);
+  // Clarity on a flat picture does nothing; nothing set leaves it alone.
+  const flat = { data: new Uint8ClampedArray(16 * 16 * 4).fill(128), width: 16, height: 16 };
+  applyEdits(flat, { ...defaultEdits(), clarity: 100, colorHue: 90 });
+  assert.equal(flat.data[0], 128);
+});
+
 test('develop: a flat RAW decode takes on the camera preview\'s tones', () => {
   // "RAW": dark, 16-bit; "preview": the same scene, bright.
   const w = 200;
