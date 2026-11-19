@@ -1,7 +1,9 @@
 # Creates a GitHub release of the version in package.json, by hand: Actions tab → polaroica-build-release →
 # Run workflow (on main). It tests and packages the extension, then publishes
 # polaroica-extension-<version>.vsix with docs/release-notes/v<version>.md as the release text, plus the
-# file's SHA-256. Before running it: bump "version" in package.json and write the release notes.
+# file's SHA-256. The package is unzipped and checked first: README.md must be the only documentation
+# inside it, and docs/ must not be there. Before running it: bump "version" in package.json and write
+# the release notes.
 name: polaroica-build-release
 
 on:
@@ -11,6 +13,10 @@ on:
         description: Create it as a draft (check it, then publish it on GitHub)
         type: boolean
         default: false
+      prerelease:
+        description: Mark it as a pre-release
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -61,21 +67,65 @@ jobs:
       - name: Package
         run: npx --yes @vscode/vsce@3.2.1 package --out "polaroica-extension-${{ steps.version.outputs.version }}.vsix"
 
+      - name: Check the package contents
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          vsix="polaroica-extension-${VERSION}.vsix"
+          unzip -Z1 "$vsix" | sort > contents.txt
+
+          {
+            echo '### `'"$vsix"'` contents'
+            echo
+            echo '```'
+            cat contents.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # README.md is the extension's page, so it is the only documentation that ships.
+          # models/README.md stays: it sits next to the face models it describes.
+          unexpected=$(grep -iE '\.(md|markdown)$' contents.txt \
+            | grep -vxF 'extension/readme.md' \
+            | grep -vxF 'extension/models/README.md' || true)
+          if [ -n "$unexpected" ]; then
+            echo "::error::$vsix carries documentation other than README.md:"
+            echo "$unexpected"
+            echo "Add it to .vscodeignore, or allow it in this step."
+            exit 1
+          fi
+
+          if grep -q '^extension/docs/' contents.txt; then
+            echo "::error::$vsix carries docs/. It is in .vscodeignore; check that the ignore file is being read."
+            exit 1
+          fi
+
+          if ! grep -qix 'extension/readme.md' contents.txt; then
+            echo "::error::$vsix has no README.md, so the extension page would be empty."
+            exit 1
+          fi
+
+          echo "README.md is the only documentation in $vsix." >> "$GITHUB_STEP_SUMMARY"
+
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
           NOTES: ${{ steps.version.outputs.notes }}
           DRAFT: ${{ inputs.draft }}
+          PRERELEASE: ${{ inputs.prerelease }}
         run: |
           vsix="polaroica-extension-${VERSION}.vsix"
           sha=$(sha256sum "$vsix" | cut -d' ' -f1)
           { cat "$NOTES"; printf '\n`%s` SHA-256: `%s`\n' "$vsix" "$sha"; } > release-body.md
           flags=()
           if [ "$DRAFT" = "true" ]; then flags+=(--draft); fi
+          if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
           gh release create "polaroica-extension-${VERSION}" "$vsix" \
             --title "polaroica-extension-${VERSION}" \
             --notes-file release-body.md \
             --target "$GITHUB_SHA" \
             "${flags[@]}"
-          echo "Released polaroica-extension-${VERSION} (${vsix}, SHA-256 ${sha})" >> "$GITHUB_STEP_SUMMARY"
+          kind="release"
+          if [ "$PRERELEASE" = "true" ]; then kind="pre-release"; fi
+          if [ "$DRAFT" = "true" ]; then kind="draft ${kind}"; fi
+          echo "Released polaroica-extension-${VERSION} as a ${kind} (${vsix}, SHA-256 ${sha})" >> "$GITHUB_STEP_SUMMARY"
