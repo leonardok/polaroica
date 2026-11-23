@@ -163,3 +163,39 @@ test('a record is kept when the file is untouched, and reports nothing', async (
   await index.set(a.fsPath, a.size, a.mtime, ['Screenshot']);
   assert.equal(changes, 0);
 });
+
+test('prune forgets photos that are no longer there', async () => {
+  const dir = tmp();
+  const index = new TagIndex(path.join(dir, 'index'));
+  const a = photo(dir, 'a.png');
+  const b = photo(dir, 'b.png');
+  const c = photo(dir, 'c.png');
+  await index.set(a.fsPath, a.size, a.mtime, ['Screenshot']);
+  await index.set(b.fsPath, b.size, b.mtime, ['Screenshot']);
+  await index.set(c.fsPath, c.size, c.mtime, ['Receipts']);
+
+  fs.rmSync(a.fsPath); // deleted
+  fs.writeFileSync(c.fsPath, 'a different picture under the same name'); // replaced
+
+  assert.equal(await index.prune(), 2);
+  assert.deepEqual(await index.allTags(), [{ tag: 'Screenshot', photos: 1 }]);
+  assert.deepEqual((await index.photosWithTag('Screenshot')).map((p) => p.fsPath), [b.fsPath]);
+});
+
+test('a folder that cannot be reached keeps its records', async () => {
+  const dir = tmp();
+  const away = path.join(dir, 'share');
+  fs.mkdirSync(away);
+  const index = new TagIndex(path.join(dir, 'index'));
+  const a = photo(away, 'a.png');
+  await index.set(a.fsPath, a.size, a.mtime, ['Screenshot']);
+
+  // The share went away: the photo is out of reach, not gone.
+  fs.rmSync(away, { recursive: true });
+
+  assert.equal(await index.prune(), 0, 'nothing is forgotten while the folder is unreachable');
+  assert.deepEqual(await index.allTags(), [{ tag: 'Screenshot', photos: 1 }]);
+  // It is still left out of the grid, which can only show photos it can read.
+  assert.deepEqual(await index.photosWithTag('Screenshot'), []);
+  assert.deepEqual(await index.allTags(), [{ tag: 'Screenshot', photos: 1 }], 'and the count survives');
+});

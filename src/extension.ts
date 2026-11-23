@@ -124,6 +124,14 @@ export function activate(context: vscode.ExtensionContext): void {
   };
   context.subscriptions.push({ dispose: () => clearTimeout(tagsDirty) });
 
+  // Photos renamed or deleted outside Polaroica leave records pointing at nothing. Clearing them
+  // out once at startup keeps the Tags counts honest without waiting for a grid to be opened; a
+  // folder that can't be reached is left alone (see TagIndex.prune).
+  void tagIndex.prune().then(
+    (n) => n && output.appendLine(`[tags] forgot ${n} photo${n === 1 ? '' : 's'} that are no longer there`),
+    () => undefined,
+  );
+
   mover.onDidMove((r) => {
     for (const m of r.moved) {
       grids.closeFor(m.from);

@@ -154,6 +154,46 @@ export class TagIndex {
     this.onChanged?.();
   }
 
+  /**
+   * Checks every record and forgets the photos that are no longer there, so the counts the tree
+   * shows are of photos that exist. Folders it can't reach are left alone — an unplugged drive or
+   * a share that is down must not look like a library that was deleted.
+   */
+  async prune(): Promise<number> {
+    await this.load();
+    const seen = new Map<string, boolean>();
+    const dead: string[] = [];
+    for (const [p, r] of [...this.byPath]) {
+      if ((await this.check(p, r, seen)) === 'gone') {
+        dead.push(p);
+      }
+    }
+    for (const p of dead) {
+      await this.forget(p);
+    }
+    return dead.length;
+  }
+
+  /**
+   * What became of a record's photo: still the file that was tagged, gone (missing from a folder
+   * that is readable, or replaced by a different file), or merely out of reach. `seen` caches one
+   * folder check per folder.
+   */
+  private async check(p: string, r: Record_, seen: Map<string, boolean>): Promise<'ok' | 'gone' | 'away'> {
+    const st = await fs.promises.stat(p).catch(() => undefined);
+    if (st) {
+      return st.size === r.s && Math.round(st.mtimeMs) === r.m ? 'ok' : 'gone';
+    }
+    const dir = path.dirname(p);
+    let there = seen.get(dir);
+    if (there === undefined) {
+      there = await fs.promises.stat(dir).then((d) => d.isDirectory(), () => false);
+      seen.set(dir, there);
+    }
+    // The folder is readable and the photo isn't in it: renamed, moved or deleted.
+    return there ? 'gone' : 'away';
+  }
+
   /** Every tag in use, most-used first. */
   async allTags(): Promise<TagCount[]> {
     await this.load();
@@ -163,8 +203,9 @@ export class TagIndex {
   }
 
   /**
-   * Photos carrying a tag. Records whose file is gone, or whose size/time no longer match, are
-   * dropped here rather than returned — so a replaced photo doesn't keep a tag it never had.
+   * Photos carrying a tag. A record whose photo is gone, or has been replaced by a different
+   * file, is forgotten here rather than returned — so a tag never points at nothing. A photo
+   * merely out of reach keeps its record and is left out of the result.
    */
   async photosWithTag(tag: string): Promise<TaggedPhoto[]> {
     await this.load();
@@ -174,17 +215,19 @@ export class TagIndex {
     }
     const out: TaggedPhoto[] = [];
     const stale: string[] = [];
+    const seen = new Map<string, boolean>();
     for (const p of [...e.paths]) {
       const r = this.byPath.get(p);
       if (!r) {
         continue;
       }
-      const st = await fs.promises.stat(p).catch(() => undefined);
-      if (!st || st.size !== r.s || Math.round(st.mtimeMs) !== r.m) {
+      const what = await this.check(p, r, seen);
+      if (what === 'gone') {
         stale.push(p);
-        continue;
+      } else if (what === 'ok') {
+        out.push({ fsPath: p, size: r.s, mtime: r.m, tags: r.t });
       }
-      out.push({ fsPath: p, size: r.s, mtime: r.m, tags: r.t });
+      // 'away': out of reach rather than gone — the record stays, the grid leaves it out.
     }
     for (const p of stale) {
       await this.forget(p);
