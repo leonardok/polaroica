@@ -134,7 +134,7 @@ export class GridPanels implements vscode.Disposable {
   }
 
   /** Right-click menu on a photo in the active grid: acts on the selection when it holds the photo. */
-  async contextAction(action: 'move' | 'reveal' | 'export', name: string | undefined): Promise<void> {
+  async contextAction(action: 'move' | 'reveal' | 'export' | 'copyPath', name: string | undefined): Promise<void> {
     const grid = [...this.panels.values()].find((p) => p.panel.active);
     if (!grid || !name) {
       return;
@@ -142,6 +142,8 @@ export class GridPanels implements vscode.Disposable {
     const uriOf = (n: string) => vscode.Uri.file(path.join(grid.folder.fsPath, n));
     if (action === 'reveal') {
       await vscode.commands.executeCommand('revealFileInOS', uriOf(name));
+    } else if (action === 'copyPath') {
+      await vscode.env.clipboard.writeText(uriOf(name).fsPath);
     } else if (action === 'export') {
       const names = grid.selected.includes(name) ? grid.selected : [name];
       await this.exporter?.exportPhotos(names.map(uriOf), grid.folder);

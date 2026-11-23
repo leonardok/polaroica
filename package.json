@@ -176,6 +176,18 @@
         "title": "Show Log",
         "category": "Polaroica",
         "icon": "$(output)"
+      },
+      {
+        "command": "polaroica.copyPath",
+        "title": "Copy Path",
+        "category": "Polaroica",
+        "icon": "$(clippy)"
+      },
+      {
+        "command": "polaroica.photoCopyPath",
+        "title": "Copy Path",
+        "category": "Polaroica",
+        "icon": "$(clippy)"
       }
     ],
     "menus": {
@@ -241,6 +253,11 @@
           "command": "polaroica.removeLibrary",
           "when": "view == polaroica.libraries && viewItem =~ /^library/",
           "group": "9_library@1"
+        },
+        {
+          "submenu": "polaroica.copy",
+          "when": "view == polaroica.libraries && viewItem =~ /^(library|folder)$/",
+          "group": "3_reveal@2"
         }
       ],
       "commandPalette": [
@@ -275,6 +292,14 @@
         {
           "command": "polaroica.photoExport",
           "when": "false"
+        },
+        {
+          "command": "polaroica.copyPath",
+          "when": "false"
+        },
+        {
+          "command": "polaroica.photoCopyPath",
+          "when": "false"
         }
       ],
       "webview/context": [
@@ -292,6 +317,23 @@
           "command": "polaroica.photoExport",
           "when": "(webviewId == 'polaroica.grid' || webviewId == 'polaroica.photo') && webviewSection == 'photo'",
           "group": "1_photo@2"
+        },
+        {
+          "submenu": "polaroica.copy",
+          "when": "(webviewId == 'polaroica.grid' || webviewId == 'polaroica.photo') && webviewSection == 'photo'",
+          "group": "1_photo@4"
+        }
+      ],
+      "polaroica.copy": [
+        {
+          "command": "polaroica.copyPath",
+          "when": "view == polaroica.libraries",
+          "group": "1_path@1"
+        },
+        {
+          "command": "polaroica.photoCopyPath",
+          "when": "webviewId == 'polaroica.grid' || webviewId == 'polaroica.photo'",
+          "group": "1_path@1"
         }
       ]
     },
@@ -431,7 +473,13 @@
           "description": "JPEG quality of exported photos (50–100). 90 keeps all visible detail; 95+ mostly makes files bigger."
         }
       }
-    }
+    },
+    "submenus": [
+      {
+        "id": "polaroica.copy",
+        "label": "Copy"
+      }
+    ]
   },
   "scripts": {
     "compile": "tsc -p ./",

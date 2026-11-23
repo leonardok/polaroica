@@ -98,7 +98,7 @@ export class PhotoViewers implements vscode.Disposable {
   }
 
   /** Right-click menu on the photo in the active photo tab. */
-  async contextAction(action: 'move' | 'reveal' | 'export'): Promise<void> {
+  async contextAction(action: 'move' | 'reveal' | 'export' | 'copyPath'): Promise<void> {
     const v = [...this.viewers].find((x) => x.panel.active);
     const photo = v?.current;
     if (!photo) {
@@ -106,6 +106,8 @@ export class PhotoViewers implements vscode.Disposable {
     }
     if (action === 'reveal') {
       await vscode.commands.executeCommand('revealFileInOS', photo.uri);
+    } else if (action === 'copyPath') {
+      await vscode.env.clipboard.writeText(photo.uri.fsPath);
     } else if (action === 'export') {
       await this.exporter?.exportPhotos([photo.uri]);
     } else {

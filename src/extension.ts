@@ -310,9 +310,14 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     // Right-click menu inside the grid and photo tabs (webview/context). VS Code passes the
     // data-vscode-context of the clicked element: { webview, webviewSection, photo }.
-    ...(['move', 'reveal', 'export'] as const).map((action) =>
+    ...(['move', 'reveal', 'export', 'copyPath'] as const).map((action) =>
       vscode.commands.registerCommand(
-        action === 'move' ? 'polaroica.photoMoveTo' : action === 'reveal' ? 'polaroica.photoReveal' : 'polaroica.photoExport',
+        {
+          move: 'polaroica.photoMoveTo',
+          reveal: 'polaroica.photoReveal',
+          export: 'polaroica.photoExport',
+          copyPath: 'polaroica.photoCopyPath',
+        }[action],
         async (ctx?: { webview?: string; photo?: string }) => {
           if (ctx?.webview === 'polaroica.grid') {
             await grids.contextAction(action, ctx.photo);
@@ -326,6 +331,12 @@ export function activate(context: vscode.ExtensionContext): void {
       const uri = uriOf(arg);
       if (uri) {
         await vscode.commands.executeCommand('revealFileInOS', uri);
+      }
+    }),
+    vscode.commands.registerCommand('polaroica.copyPath', async (arg?: unknown) => {
+      const uri = uriOf(arg);
+      if (uri) {
+        await vscode.env.clipboard.writeText(uri.fsPath);
       }
     }),
   );
