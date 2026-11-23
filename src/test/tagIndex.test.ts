@@ -131,3 +131,35 @@ test('the log is compacted, so repeated scans do not grow it without bound', asy
   const reopened = new TagIndex(file);
   assert.deepEqual(await reopened.tagsOf(a.fsPath), [tagFor(writes - 1)]);
 });
+
+test('dropping a renamed photo on read reports the change, so a stale count cannot survive it', async () => {
+  const dir = tmp();
+  const index = new TagIndex(path.join(dir, 'index'));
+  const a = photo(dir, 'a.png');
+  const b = photo(dir, 'b.png');
+  await index.set(a.fsPath, a.size, a.mtime, ['Screenshot']);
+  await index.set(b.fsPath, b.size, b.mtime, ['Screenshot']);
+  assert.deepEqual(await index.allTags(), [{ tag: 'Screenshot', photos: 2 }]);
+
+  let changes = 0;
+  index.onChanged = () => changes++;
+  // Renamed outside Polaroica: the path the index holds no longer exists.
+  fs.renameSync(a.fsPath, path.join(dir, 'renamed.png'));
+
+  assert.deepEqual((await index.photosWithTag('Screenshot')).map((p) => p.fsPath), [b.fsPath]);
+  assert.equal(changes, 1, 'the dropped record is reported');
+  assert.deepEqual(await index.allTags(), [{ tag: 'Screenshot', photos: 1 }]);
+});
+
+test('a record is kept when the file is untouched, and reports nothing', async () => {
+  const dir = tmp();
+  const index = new TagIndex(path.join(dir, 'index'));
+  const a = photo(dir, 'a.png');
+  await index.set(a.fsPath, a.size, a.mtime, ['Screenshot']);
+  let changes = 0;
+  index.onChanged = () => changes++;
+  assert.equal((await index.photosWithTag('Screenshot')).length, 1);
+  // Writing the same tags again must not grow the log or report a change.
+  await index.set(a.fsPath, a.size, a.mtime, ['Screenshot']);
+  assert.equal(changes, 0);
+});

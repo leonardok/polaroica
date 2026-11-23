@@ -91,6 +91,12 @@
 .tile .label {
   font-size: 11px;
   color: var(--muted);
+  /* The box is the tile's width, whatever the name's length: a flex item left to size itself
+     grows to fit the text and then has nothing to clip, so the name runs under its neighbour. */
+  display: block;
+  align-self: stretch;
+  width: 100%;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -98,6 +104,7 @@
 /* Which folder the photo is in: shown in a tag album, where the photos come from many. */
 .tile .label .sub {
   display: block;
+  max-width: 100%;
   font-size: 10px;
   opacity: 0.7;
   overflow: hidden;

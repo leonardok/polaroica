@@ -115,6 +115,15 @@ export function activate(context: vscode.ExtensionContext): void {
   });
 
   // A moved folder: close grids that showed it (their path no longer exists).
+  // The index drops a record whose photo is gone or has changed, which happens while a tag grid is
+  // being filled. Without this the Tags row keeps showing a count no photo backs any more.
+  let tagsDirty: NodeJS.Timeout | undefined;
+  tagIndex.onChanged = () => {
+    clearTimeout(tagsDirty);
+    tagsDirty = setTimeout(() => tree.tagsChanged(), 150);
+  };
+  context.subscriptions.push({ dispose: () => clearTimeout(tagsDirty) });
+
   mover.onDidMove((r) => {
     for (const m of r.moved) {
       grids.closeFor(m.from);

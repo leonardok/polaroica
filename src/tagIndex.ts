@@ -50,6 +50,11 @@ export class TagIndex {
   private loaded?: Promise<void>;
   private writing: Promise<unknown> = Promise.resolve();
   private readonly file: string;
+  /**
+   * Called after the set of tags, or what carries them, changed — including when a stale record is
+   * dropped on read. The tree listens, so a count can't outlive the photos behind it.
+   */
+  onChanged?: () => void;
 
   constructor(private readonly dir: string) {
     this.file = path.join(dir, FILE);
@@ -135,6 +140,7 @@ export class TagIndex {
     }
     this.apply(r);
     await this.append(r);
+    this.onChanged?.();
   }
 
   /** Forgets a photo (deleted, or moved away). */
@@ -145,6 +151,7 @@ export class TagIndex {
     }
     this.apply({ p: fsPath, s: 0, m: 0, t: [] });
     await this.append({ p: fsPath, s: 0, m: 0, t: [] });
+    this.onChanged?.();
   }
 
   /** Every tag in use, most-used first. */

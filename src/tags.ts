@@ -110,12 +110,25 @@ export class TagScanner {
     // Write only where a scan tag needs to be added or withdrawn, so a second run over an
     // already-scanned library touches no files.
     const changes = verdicts.filter((v): v is { photo: Photo; tags: string[] } => !!v);
+    // One read of the folder's sidecars rather than one per photo: `tagsIn` goes through the
+    // folder index, so a re-scan over a network share doesn't re-read every sidecar.
+    const folder = changes.length ? path.dirname(changes[0].photo.uri.fsPath) : undefined;
+    const already = folder ? await this.edits.tagsIn(folder).catch(() => new Map<string, string[]>()) : new Map<string, string[]>();
     const toWrite: { photo: Photo; add: string[] }[] = [];
+    const toIndex: Photo[] = [];
     for (const { photo, tags } of changes) {
-      const have = (await this.edits.tagsOf(photo.uri)).filter((t) => SCAN_TAGS.some((s) => s.toLowerCase() === t.toLowerCase()));
+      const all = already.get(photo.name) ?? [];
+      const have = all.filter((t) => SCAN_TAGS.some((s) => s.toLowerCase() === t.toLowerCase()));
       const want = tags;
       const sameAlready = have.length === want.length && want.every((w) => have.some((h) => h.toLowerCase() === w.toLowerCase()));
-      if (!sameAlready) {
+      if (sameAlready) {
+        // Nothing to write, but the sidecar may carry tags the index has never seen — a tag added
+        // by hand, or one stranded when the photo was renamed outside Polaroica. The index is a
+        // cache of the sidecars, so a scan is where it catches up with them.
+        if (all.length) {
+          toIndex.push(photo);
+        }
+      } else {
         toWrite.push({ photo, add: want });
       }
       if (want.length) {
@@ -125,6 +138,9 @@ export class TagScanner {
         }
       }
     }
+    await mapLimit(toIndex, 8, async (photo) => {
+      await this.index.set(photo.uri.fsPath, photo.size, photo.mtime, already.get(photo.name) ?? []);
+    });
     await mapLimit(toWrite, 6, async ({ photo, add }) => {
       // `replaceAuto` lets the scan withdraw a guess it no longer stands behind; a tag added by
       // hand is never touched (see EditStore.tag).
