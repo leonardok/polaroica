@@ -216,6 +216,16 @@ export interface Sidecar {
   flag?: Flag;
   /** Set when the rating/flag came from Auto-Rank (cleared when you rate yourself). */
   auto?: AutoRank;
+  /**
+   * Keywords, as `dc:subject` — the standard field, so other photo programs read them. Order is
+   * kept as written; comparison is case-insensitive (see `normalizeTags`).
+   */
+  tags?: string[];
+  /**
+   * Which of `tags` a scan wrote rather than a person. A later scan may drop these, but never a
+   * tag added by hand. The same idea as `auto` for ratings.
+   */
+  autoTags?: string[];
 }
 
 export function emptySidecar(): Sidecar {
@@ -223,11 +233,33 @@ export function emptySidecar(): Sidecar {
 }
 
 export function isEmptySidecar(s: Sidecar): boolean {
-  return isDefault(s.edits) && !s.rating && !s.flag && !s.auto;
+  return isDefault(s.edits) && !s.rating && !s.flag && !s.auto && !s.tags?.length;
+}
+
+/** Trims, drops blanks, and removes repeats (case-insensitively), keeping the order given. */
+export function normalizeTags(tags: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of tags) {
+    const t = raw.trim().replace(/\s+/g, ' ');
+    const k = t.toLowerCase();
+    if (t && !seen.has(k)) {
+      seen.add(k);
+      out.push(t);
+    }
+  }
+  return out;
+}
+
+/** True when the two name the same tag (tags are matched without regard to case). */
+export function sameTag(a: string, b: string): boolean {
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
 }
 
 const escapeAttr = (t: string) => t.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const unescapeAttr = (t: string) => t.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+const escapeText = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const unescapeText = (t: string) => t.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
 
 export function toXmp(input: Edits | Sidecar): string {
   const sc: Sidecar = 'edits' in input ? input : { ...emptySidecar(), edits: input };
@@ -237,13 +269,22 @@ export function toXmp(input: Edits | Sidecar): string {
     // Kelvin, as Camera Raw writes it, plus the temperature it was set against.
     ...(hasKelvin(e) ? [`   crs:Temperature="${e.kelvin}"`, `   polaroica:TemperatureRef="${e.kelvinRef}"`] : []),
   ].join('\n');
+  const tags = normalizeTags(sc.tags ?? []);
+  const autoTags = normalizeTags(sc.autoTags ?? []).filter((t) => tags.some((x) => sameTag(x, t)));
   const culling = [
     `   xmp:Rating="${sc.rating}"`,
     sc.flag ? `   polaroica:Flag="${sc.flag}"` : '',
     sc.auto ? `   polaroica:AutoRank="${escapeAttr(JSON.stringify(sc.auto))}"` : '',
+    autoTags.length ? `   polaroica:AutoTags="${escapeAttr(JSON.stringify(autoTags))}"` : '',
   ]
     .filter(Boolean)
     .join('\n');
+  // Keywords as an unordered dc:subject bag, the shape every XMP reader expects.
+  const subject = tags.length
+    ? `   <dc:subject>\n    <rdf:Bag>\n` +
+      tags.map((t) => `     <rdf:li>${escapeText(t)}</rdf:li>\n`).join('') +
+      `    </rdf:Bag>\n   </dc:subject>\n`
+    : '';
   const curves = (['rgb', 'r', 'g', 'b'] as const)
     .map(
       (k) =>
@@ -258,12 +299,13 @@ export function toXmp(input: Edits | Sidecar): string {
   <rdf:Description rdf:about=""
    xmlns:xmp="http://ns.adobe.com/xap/1.0/"
    xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/"
+   xmlns:dc="http://purl.org/dc/elements/1.1/"
    xmlns:polaroica="https://github.com/leonardok/polaroica/ns/1.0/"
    polaroica:version="1"
    crs:HasSettings="True"
 ${culling}
 ${attrs}>
-${curves}
+${subject}${curves}
   </rdf:Description>
  </rdf:RDF>
 </x:xmpmeta>
@@ -316,7 +358,43 @@ export function readSidecar(text: string): Sidecar {
       /* ignore a damaged value */
     }
   }
+  const tags = readTags(text);
+  if (tags.length) {
+    sc.tags = tags;
+    const autoTags = /(?:polaroica|vsphoto):AutoTags\s*=\s*"([^"]*)"/.exec(text);
+    if (autoTags) {
+      try {
+        const parsed = JSON.parse(unescapeAttr(autoTags[1])) as unknown;
+        if (Array.isArray(parsed)) {
+          const kept = normalizeTags(parsed.filter((t): t is string => typeof t === 'string')).filter((t) =>
+            tags.some((x) => sameTag(x, t)),
+          );
+          if (kept.length) {
+            sc.autoTags = kept;
+          }
+        }
+      } catch {
+        /* ignore a damaged value */
+      }
+    }
+  }
   return sc;
+}
+
+/**
+ * Keywords from a sidecar: the `dc:subject` bag we write, or — for files written elsewhere — a
+ * `dc:subject` attribute holding a separated list.
+ */
+function readTags(text: string): string[] {
+  const bag = /<dc:subject>([\s\S]*?)<\/dc:subject>/.exec(text);
+  if (bag) {
+    return normalizeTags([...bag[1].matchAll(/<rdf:li[^>]*>([\s\S]*?)<\/rdf:li>/g)].map((m) => unescapeText(m[1].trim())));
+  }
+  const attr = /dc:subject\s*=\s*"([^"]*)"/.exec(text);
+  if (attr) {
+    return normalizeTags(unescapeAttr(attr[1]).split(/[;,]/));
+  }
+  return [];
 }
 
 /** `<folder>/.sidecar/<name>.xmp` — the sidecar folder keeps them out of the way. */

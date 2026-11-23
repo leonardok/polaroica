@@ -9,7 +9,9 @@ import {
   Flag,
   isDefault,
   isEmptySidecar,
+  normalizeTags,
   readSidecar,
+  sameTag,
   Sidecar,
   SIDECAR_DIR,
   sidecarName,
@@ -23,6 +25,24 @@ export interface CullInfo {
   flag?: Flag;
   auto?: AutoRank;
   edited: boolean;
+  /** Keywords from the sidecar's `dc:subject`, in the order written. */
+  tags?: string[];
+  /** Which of `tags` a scan wrote rather than a person. */
+  autoTags?: string[];
+}
+
+/** Tags to add and remove on a set of photos. */
+export interface TagChange {
+  add?: readonly string[];
+  remove?: readonly string[];
+  /**
+   * The change comes from a scan: the added tags are marked automatic, and a scan may drop the
+   * automatic tags it no longer stands behind (`replaceAuto`). A change without this is "yours",
+   * and the tags it adds are never removed by a later scan.
+   */
+  auto?: boolean;
+  /** With `auto`: drop every automatic tag this photo had that isn't being added again. */
+  replaceAuto?: boolean;
 }
 
 export interface RatingChange {
@@ -33,7 +53,7 @@ export interface RatingChange {
   auto?: AutoRank | null;
 }
 
-const CULL_KEY = 'culling-v1';
+const CULL_KEY = 'culling-v2';
 
 /**
  * Sidecars next to the photos: `<folder>/.sidecar/<photo>.xmp`, holding edits, star rating,
@@ -97,6 +117,52 @@ export class EditStore {
     });
   }
 
+  /**
+   * Adds and removes keywords on several photos (in one folder or not). Returns each photo's tags
+   * as they now stand, so the caller can update the index without reading the sidecars again.
+   */
+  async tag(photos: vscode.Uri[], change: TagChange): Promise<Map<string, string[]>> {
+    const add = normalizeTags(change.add ?? []);
+    const remove = normalizeTags(change.remove ?? []);
+    const out = new Map<string, string[]>();
+    await mapLimit(photos, 6, async (photo) => {
+      const sc = (await this.loadSidecar(photo)) ?? emptySidecar();
+      const was = sc.tags ?? [];
+      const wasAuto = sc.autoTags ?? [];
+      // A scan may drop its own earlier guesses, never a tag added by hand.
+      const dropped = change.auto && change.replaceAuto ? wasAuto.filter((t) => !add.some((a) => sameTag(a, t))) : [];
+      const gone = [...remove, ...dropped];
+      const kept = was.filter((t) => !gone.some((g) => sameTag(g, t)));
+      const tags = normalizeTags([...kept, ...add]);
+      const auto = normalizeTags([
+        // A tag you add by hand stops being automatic, even if a scan put it there first.
+        ...wasAuto.filter((t) => tags.some((x) => sameTag(x, t)) && !(!change.auto && add.some((a) => sameTag(a, t)))),
+        ...(change.auto ? add : []),
+      ]).filter((t) => tags.some((x) => sameTag(x, t)));
+      sc.tags = tags.length ? tags : undefined;
+      sc.autoTags = auto.length ? auto : undefined;
+      await this.write(photo, sc);
+      out.set(photo.fsPath, tags);
+    });
+    return out;
+  }
+
+  /** The photo's keywords. */
+  async tagsOf(photo: vscode.Uri): Promise<string[]> {
+    return (await this.loadSidecar(photo))?.tags ?? [];
+  }
+
+  /** Keywords of every photo in a folder that has any (photo file name -> tags). */
+  async tagsIn(folder: string): Promise<Map<string, string[]>> {
+    const map = new Map<string, string[]>();
+    for (const [name, c] of await this.cullingIn(folder)) {
+      if (c.tags?.length) {
+        map.set(name, c.tags);
+      }
+    }
+    return map;
+  }
+
   /** Writes a whole sidecar (Auto-Rank undo restores earlier ones this way). */
   async write(photo: vscode.Uri, sc: Sidecar): Promise<void> {
     const file = this.sidecarPath(photo);
@@ -116,7 +182,7 @@ export class EditStore {
     if (isEmptySidecar(sc)) {
       map.delete(name);
     } else {
-      map.set(name, { rating: sc.rating, flag: sc.flag, auto: sc.auto, edited: !isDefault(sc.edits) });
+      map.set(name, cullOf(sc));
     }
     await this.remember(folder, map);
     this.changed.fire(photo);
@@ -155,7 +221,7 @@ export class EditStore {
     await mapLimit(files, 8, async (f) => {
       try {
         const sc = readSidecar(await fs.promises.readFile(path.join(dir, f), 'utf8'));
-        map.set(f.slice(0, -4), { rating: sc.rating, flag: sc.flag, auto: sc.auto, edited: !isDefault(sc.edits) });
+        map.set(f.slice(0, -4), cullOf(sc));
       } catch {
         /* unreadable sidecar: skip */
       }
@@ -203,6 +269,17 @@ export class EditStore {
   dispose(): void {
     this.changed.dispose();
   }
+}
+
+function cullOf(sc: Sidecar): CullInfo {
+  return {
+    rating: sc.rating,
+    flag: sc.flag,
+    auto: sc.auto,
+    edited: !isDefault(sc.edits),
+    tags: sc.tags?.length ? sc.tags : undefined,
+    autoTags: sc.autoTags?.length ? sc.autoTags : undefined,
+  };
 }
 
 async function exists(p: string): Promise<boolean> {

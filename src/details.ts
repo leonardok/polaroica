@@ -6,7 +6,15 @@ import { Photo, PhotoStore } from './photoStore';
 
 /** What the webviews show for one photo. */
 export interface PhotoView {
+  /**
+   * How the grid that shows it identifies it: the file name in a folder album, a relative path in
+   * a tag album, where two folders can hold the same file name. Opaque to the webview.
+   */
   name: string;
+  /** The caption. Same as `name` in a folder album. */
+  label?: string;
+  /** A quieter second line: which folder the photo is in, in a tag album. */
+  sub?: string;
   path: string;
   /** file:// URI, used for drag and drop. */
   fileUri: string;
@@ -20,6 +28,7 @@ export interface PhotoView {
 export function toView(webview: vscode.Webview, p: Photo): PhotoView {
   return {
     name: p.name,
+    label: p.name,
     path: p.uri.fsPath,
     fileUri: p.uri.toString(),
     src: isDisplayable(p.name) ? webview.asWebviewUri(p.uri).toString() : undefined,

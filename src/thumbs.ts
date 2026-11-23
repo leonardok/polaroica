@@ -79,8 +79,8 @@ export class ThumbService {
     return this.fgHeads.busy + this.fgFulls.busy > 0;
   }
 
-  job(folder: vscode.Uri, sink: ThumbSink): ThumbJob {
-    return new ThumbJob(this, folder, sink);
+  job(sink: ThumbSink): ThumbJob {
+    return new ThumbJob(this, sink);
   }
 
   /** Cached thumbnails (sharp, or quick ones as stand-ins) for photos of one folder: local reads. */
@@ -227,9 +227,24 @@ export class ThumbService {
   }
 }
 
-/** The thumbnail work for one open grid: visible photos first, then the rest of the folder. */
+/**
+ * One photo of an open grid, under the identity the grid knows it by. In a folder album that's the
+ * file name; in a tag album it's a path, because two folders can hold the same file name.
+ */
+export interface JobPhoto {
+  key: string;
+  photo: Photo;
+}
+
+/**
+ * The thumbnail work for one open grid: visible photos first, then the rest. The photos need not
+ * share a folder — each one's cache is found from its own path.
+ */
 export class ThumbJob {
-  private photos: Photo[] = [];
+  private items: JobPhoto[] = [];
+  /** key -> photo, and photo path -> key (for `offer`). */
+  private byKey = new Map<string, Photo>();
+  private keyOfPath = new Map<string, string>();
   private visible: string[] = [];
   private readonly sent = new Map<string, 'thumb' | 'placeholder'>();
   private readonly triedQuick = new Set<string>();
@@ -240,19 +255,20 @@ export class ThumbJob {
 
   constructor(
     private readonly service: ThumbService,
-    private readonly folder: vscode.Uri,
     private readonly sink: ThumbSink,
   ) {}
 
-  setPhotos(photos: Photo[]): void {
-    this.photos = photos;
+  setPhotos(items: JobPhoto[]): void {
+    this.items = items;
+    this.byKey = new Map(items.map((i) => [i.key, i.photo]));
+    this.keyOfPath = new Map(items.map((i) => [i.photo.uri.fsPath, i.key]));
     this.sent.clear();
     this.failed.clear();
     void this.pump();
   }
 
-  setVisible(names: string[]): void {
-    this.visible = names;
+  setVisible(keys: string[]): void {
+    this.visible = keys;
     void this.pump();
   }
 
@@ -260,22 +276,58 @@ export class ThumbJob {
     void this.pump();
   }
 
-  /** A thumbnail was made elsewhere (background pass): show it if it's ours. */
+  /** A thumbnail was made elsewhere (background pass): show it if the photo is one of ours. */
   offer(photo: Photo, t: Thumb): void {
-    if (this.disposed || path.dirname(photo.uri.fsPath) !== this.folder.fsPath) {
+    const key = this.keyOfPath.get(photo.uri.fsPath);
+    if (this.disposed || !key) {
       return;
     }
     const kind = t.quick ? 'placeholder' : 'thumb';
-    if (this.sent.get(photo.name) === 'thumb' && kind === 'placeholder') {
+    if (this.sent.get(key) === 'thumb' && kind === 'placeholder') {
       return;
     }
-    this.sink.send([{ name: photo.name, data: t.data, mime: 'image/webp', kind }]);
-    this.sent.set(photo.name, kind);
+    this.sink.send([{ name: key, data: t.data, mime: 'image/webp', kind }]);
+    this.sent.set(key, kind);
   }
 
   dispose(): void {
     this.disposed = true;
-    void this.service.compact(this.folder);
+    for (const folder of this.folders()) {
+      void this.service.compact(vscode.Uri.file(folder));
+    }
+  }
+
+  /** The distinct folders this job's photos live in. */
+  private folders(): string[] {
+    return [...new Set(this.items.map((i) => path.dirname(i.photo.uri.fsPath)))];
+  }
+
+  /**
+   * Cached thumbnails for a mixed batch. `ThumbService.cached` is keyed by file name within one
+   * folder, so the batch is grouped by folder and asked for a folder at a time.
+   */
+  private async cachedFor(items: JobPhoto[]): Promise<Map<string, Thumb>> {
+    const groups = new Map<string, JobPhoto[]>();
+    for (const i of items) {
+      const dir = path.dirname(i.photo.uri.fsPath);
+      const g = groups.get(dir);
+      if (g) {
+        g.push(i);
+      } else {
+        groups.set(dir, [i]);
+      }
+    }
+    const out = new Map<string, Thumb>();
+    for (const [dir, group] of groups) {
+      const got = await this.service.cached(vscode.Uri.file(dir), group.map((i) => i.photo));
+      for (const i of group) {
+        const t = got.get(i.photo.name);
+        if (t) {
+          out.set(i.key, t);
+        }
+      }
+    }
+    return out;
   }
 
   private send(name: string, t: Thumb): void {
@@ -291,38 +343,42 @@ export class ThumbJob {
     this.pumping = true;
     try {
       while (!this.disposed && this.sink.active) {
-        const byName = new Map(this.photos.map((p) => [p.name, p]));
-        const visible = this.visible.map((n) => byName.get(n)).filter((p): p is Photo => !!p);
+        const visible = this.visible
+          .map((k) => {
+            const photo = this.byKey.get(k);
+            return photo ? { key: k, photo } : undefined;
+          })
+          .filter((i): i is JobPhoto => !!i);
 
         // 1. Cached thumbnails (sharp, or quick stand-ins) for what's on screen: local reads.
-        const unsent = visible.filter((p) => this.sent.get(p.name) !== 'thumb');
+        const unsent = visible.filter((i) => this.sent.get(i.key) !== 'thumb');
         if (unsent.length) {
-          const cached = await this.service.cached(this.folder, unsent);
-          for (const [name, t] of cached) {
-            if (!(t.quick && this.sent.get(name) === 'placeholder')) {
-              this.send(name, t);
+          const cached = await this.cachedFor(unsent);
+          for (const [key, t] of cached) {
+            if (!(t.quick && this.sent.get(key) === 'placeholder')) {
+              this.send(key, t);
             }
             if (t.quick) {
-              this.triedQuick.add(name);
+              this.triedQuick.add(key);
             }
           }
         }
 
         // 2. Next task: a quick thumbnail for a visible photo with nothing yet, else a sharp one.
-        const needsSharp = (p: Photo) => this.sent.get(p.name) !== 'thumb' && !this.failed.has(p.name) && !this.inflight.has(p.name);
-        const quickFor = visible.find((p) => needsSharp(p) && !this.sent.has(p.name) && !this.triedQuick.has(p.name));
-        const sharpFor = visible.find(needsSharp) ?? this.photos.find(needsSharp);
+        const needsSharp = (i: JobPhoto) => this.sent.get(i.key) !== 'thumb' && !this.failed.has(i.key) && !this.inflight.has(i.key);
+        const quickFor = visible.find((i) => needsSharp(i) && !this.sent.has(i.key) && !this.triedQuick.has(i.key));
+        const sharpFor = visible.find(needsSharp) ?? this.items.find(needsSharp);
         if (!quickFor && !sharpFor) {
           break;
         }
         if (this.inflight.size >= 3) {
           break; // finishing tasks call pump() again
         }
-        const p = (quickFor ?? sharpFor)!;
-        const task = quickFor ? this.makeQuick(p) : this.makeSharp(p);
-        this.inflight.add(p.name);
+        const i = (quickFor ?? sharpFor)!;
+        const task = quickFor ? this.makeQuick(i) : this.makeSharp(i);
+        this.inflight.add(i.key);
         void task.finally(() => {
-          this.inflight.delete(p.name);
+          this.inflight.delete(i.key);
           void this.pump();
         });
       }
@@ -331,44 +387,45 @@ export class ThumbJob {
     }
   }
 
-  private async makeQuick(p: Photo): Promise<void> {
-    this.triedQuick.add(p.name);
-    const t = await this.service.quick(p, this.service.fgHeads);
-    if (t && !this.disposed && !this.sent.has(p.name)) {
-      this.send(p.name, t);
+  private async makeQuick({ key, photo }: JobPhoto): Promise<void> {
+    this.triedQuick.add(key);
+    const t = await this.service.quick(photo, this.service.fgHeads);
+    if (t && !this.disposed && !this.sent.has(key)) {
+      this.send(key, t);
     }
   }
 
-  private async makeSharp(p: Photo): Promise<void> {
+  private async makeSharp(item: JobPhoto): Promise<void> {
+    const { key, photo: p } = item;
     if ((await this.service.state(p)) === 'sharp') {
-      const t = (await this.service.cached(this.folder, [p])).get(p.name);
+      const t = (await this.cachedFor([item])).get(key);
       if (t && !t.quick) {
-        this.send(p.name, t);
+        this.send(key, t);
         return;
       }
     }
     let t = await this.service.sharp(p, this.service.fgHeads, this.service.fgFulls);
     if (!t && !isJpeg(p.name) && !isRaw(p.name)) {
-      t = await this.viaWebview(p); // PNG, WebP, GIF…: the browser decodes them
+      t = await this.viaWebview(item); // PNG, WebP, GIF…: the browser decodes them
     }
     if (this.disposed) {
       return;
     }
     if (t) {
-      this.send(p.name, t);
+      this.send(key, t);
     } else {
-      this.failed.add(p.name);
+      this.failed.add(key);
     }
   }
 
-  private async viaWebview(p: Photo): Promise<Thumb | undefined> {
-    const src = await this.service.source(p);
+  private async viaWebview({ key, photo }: JobPhoto): Promise<Thumb | undefined> {
+    const src = await this.service.source(photo);
     if (!src || this.disposed) {
       return undefined;
     }
-    const t = await this.sink.decode(p.name, src.data, src.mime, thumbPx()).catch(() => undefined);
+    const t = await this.sink.decode(key, src.data, src.mime, thumbPx()).catch(() => undefined);
     if (t) {
-      await this.service.save(p, t);
+      await this.service.save(photo, t);
       this.service.sources.webview++;
     }
     return t;

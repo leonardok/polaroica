@@ -11,6 +11,8 @@ export interface ExifInfo {
   make?: string;
   model?: string;
   lens?: string;
+  /** The Software tag: screenshots and scanners name themselves here, cameras name firmware. */
+  software?: string;
   dateTaken?: string; // "YYYY:MM:DD HH:MM:SS" as stored
   subSec?: string; // fraction of a second, e.g. "34" (bursts take several frames per second)
   exposureTime?: number; // seconds
@@ -36,6 +38,7 @@ const TAG = {
   model: 0x0110,
   stripOffsets: 0x0111,
   orientation: 0x0112,
+  software: 0x0131,
   stripByteCounts: 0x0117,
   subIfds: 0x014a,
   jpegOffset: 0x0201,
@@ -215,6 +218,7 @@ export function readExif(buf: Uint8Array): ExifInfo | undefined {
     info.make ??= str(t.get(TAG.make));
     info.model ??= str(t.get(TAG.model));
     info.lens ??= str(t.get(TAG.lensModel));
+    info.software ??= str(t.get(TAG.software));
     info.dateTaken ??= str(t.get(TAG.dateTimeOriginal));
     info.subSec ??= str(t.get(TAG.subSecOriginal));
     info.exposureTime ??= num(t.get(TAG.exposureTime));

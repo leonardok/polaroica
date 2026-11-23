@@ -18,6 +18,10 @@ All commands are under the **Polaroica** category in the Command Palette
 | **Undo Auto-Rank** | Right-click an album, Command Palette | Restore the ratings from before the last Auto-Rank. |
 | **Export to JPEG…** | Right-click an album or photo, grid toolbar, Command Palette | Export photos with your edits baked in. |
 | **Delete Rejected Photos…** | Right-click an album, grid toolbar, Command Palette | Send an album's rejected photos to the Trash. |
+| **Find Documents and Screenshots…** | Right-click a library or album, Command Palette | Look through it and its sub-albums and tag the screenshots it finds. |
+| **Show Tagged Photos…** | Click a tag under **Tags**, Command Palette | Open a grid of every photo carrying a tag, from every library. |
+| **Tag…** | Right-click a photo in the grid | Add a tag to the selected photos, or take it off again. |
+| **Remove Tags…** | Right-click a photo in the grid | Pick from the tags the selected photos carry and take them off. |
 | **Build Thumbnails Here…** | Album right-click | Build an album's thumbnails ahead of time, with or without its sub-albums. |
 | **Build All Thumbnails** | Command Palette | Start building thumbnails for every library. |
 | **Thumbnail Progress…** | Command Palette | Details of the thumbnail build; pause, resume or stop it. |
@@ -35,3 +39,23 @@ All commands are under the **Polaroica** category in the Command Palette
 | `0`–`5` | Star rating | same |
 | `\` (hold) | | Before / After |
 | Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z | | Undo / redo an adjustment |
+
+## Tags
+
+Tags are keywords on your photos. **Find Documents and Screenshots…** writes them
+automatically — today it recognises screenshots from each file's metadata, without
+decoding anything, so it gets through a large library in seconds. You can add your own
+with **Tag…** on a photo in the grid, and take them off a selection with
+**Remove Tags…**.
+
+Tags are stored as `dc:subject` in the photo's sidecar
+(`<album>/.sidecar/<photo>.xmp`), the standard XMP field, so other photo programs read
+them too. The photo file itself is never written. A tag a scan wrote is marked as
+automatic, so a later scan can correct its own guesses — a tag you added by hand is never
+removed by a scan.
+
+Every tag in use appears under **Tags** in the Libraries view, with the number of photos
+carrying it. Clicking one opens a grid of those photos, gathered from every library, with
+the folder each one is in shown under its name. Album-wide actions (Auto-Rank, Export,
+Delete Rejected) are hidden there, because the photos come from many albums — open a photo
+or its album to use them.

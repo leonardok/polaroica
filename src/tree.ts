@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import { albumStats } from './core/albumStats';
 import { Libraries } from './libraries';
 import { isReachable, mapLimit, PhotoStore } from './photoStore';
+import { TagIndex } from './tagIndex';
 
 export const TREE_MIME = 'application/vnd.code.tree.polaroica.libraries';
 
@@ -19,7 +20,21 @@ export class FolderNode {
   constructor(readonly uri: vscode.Uri, readonly parent: TreeNode) {}
 }
 
-export type TreeNode = LibraryNode | FolderNode;
+/** The "Tags" row: holds one child per tag in use. Shown only once something is tagged. */
+export class TagsRootNode {
+  readonly type = 'tags';
+}
+
+/** One tag: opens a grid of every photo carrying it, from every library. */
+export class TagNode {
+  readonly type = 'tag';
+  constructor(
+    readonly tag: string,
+    readonly photos: number,
+  ) {}
+}
+
+export type TreeNode = LibraryNode | FolderNode | TagsRootNode | TagNode;
 
 /** The "Libraries" view: libraries (workspace folders) as roots, sub-folders below. */
 export class LibraryTree implements vscode.TreeDataProvider<TreeNode>, vscode.TreeDragAndDropController<TreeNode> {
@@ -35,6 +50,8 @@ export class LibraryTree implements vscode.TreeDataProvider<TreeNode>, vscode.Tr
   cullingIn?: (folder: string) => Promise<ReadonlyMap<string, { rating: number; flag?: string; edited: boolean; auto?: unknown }>>;
   /** Set by the extension: the media folder, for the tree's own icons. */
   media?: vscode.Uri;
+  /** Set by the extension: which photos carry which tags, for the "Tags" rows. */
+  tags?: TagIndex;
   private readonly offline = new Set<string>();
   private readonly nodes = new Map<string, FolderNode>();
 
@@ -54,6 +71,11 @@ export class LibraryTree implements vscode.TreeDataProvider<TreeNode>, vscode.Tr
       const node = this.nodes.get(folder.fsPath);
       this.changed.fire(node ? node.parent : undefined);
     });
+  }
+
+  /** Tags were added or removed: redraw the "Tags" rows. */
+  tagsChanged(): void {
+    this.changed.fire(undefined);
   }
 
   /** An album's ratings or flags changed: redraw its row so the hover is made again. */
@@ -82,6 +104,26 @@ export class LibraryTree implements vscode.TreeDataProvider<TreeNode>, vscode.Tr
 
   getTreeItem(node: TreeNode): vscode.TreeItem {
     const showCounts = vscode.workspace.getConfiguration('polaroica').get<boolean>('showPhotoCounts', true);
+    if (node instanceof TagsRootNode) {
+      const item = new vscode.TreeItem('Tags', vscode.TreeItemCollapsibleState.Expanded);
+      item.id = 'tags';
+      item.iconPath = new vscode.ThemeIcon('tag');
+      item.contextValue = 'tags';
+      item.tooltip = 'Keywords on your photos. Right-click a library to look for documents and screenshots.';
+      return item;
+    }
+    if (node instanceof TagNode) {
+      const item = new vscode.TreeItem(node.tag, vscode.TreeItemCollapsibleState.None);
+      item.id = 'tag:' + node.tag.toLowerCase();
+      item.iconPath = new vscode.ThemeIcon('tag');
+      item.contextValue = 'tag';
+      if (showCounts) {
+        item.description = node.photos.toLocaleString();
+      }
+      item.tooltip = `${node.photos.toLocaleString()} photo${node.photos === 1 ? '' : 's'} tagged ${node.tag}`;
+      item.command = { command: 'polaroica.openTag', title: 'Open', arguments: [node.tag] };
+      return item;
+    }
     if (node instanceof LibraryNode) {
       const kind = this.libraries.kind(node.folder);
       const isOffline = this.offline.has(node.uri.fsPath);
@@ -166,10 +208,20 @@ export class LibraryTree implements vscode.TreeDataProvider<TreeNode>, vscode.Tr
   }
 
   getParent(node: TreeNode): TreeNode | undefined {
+    if (node instanceof TagNode) {
+      return new TagsRootNode();
+    }
     return node instanceof FolderNode ? node.parent : undefined;
   }
 
   async getChildren(node?: TreeNode): Promise<TreeNode[]> {
+    if (node instanceof TagNode) {
+      return [];
+    }
+    if (node instanceof TagsRootNode) {
+      const counts = (await this.tags?.allTags()) ?? [];
+      return counts.map((c) => new TagNode(c.tag, c.photos));
+    }
     if (!node) {
       const libs = this.libraries.all.map((f) => new LibraryNode(f));
       // Check reachability in the background; a share that went away shows as offline.
@@ -187,7 +239,9 @@ export class LibraryTree implements vscode.TreeDataProvider<TreeNode>, vscode.Tr
           }
         }),
       );
-      return libs;
+      // The "Tags" row only appears once something is tagged.
+      const tagged = ((await this.tags?.allTags()) ?? []).length > 0;
+      return tagged ? [...libs, new TagsRootNode()] : libs;
     }
     if (node instanceof LibraryNode && this.offline.has(node.uri.fsPath)) {
       return [];
@@ -236,8 +290,8 @@ export class LibraryTree implements vscode.TreeDataProvider<TreeNode>, vscode.Tr
   }
 
   async handleDrop(target: TreeNode | undefined, data: vscode.DataTransfer): Promise<void> {
-    if (!target) {
-      return;
+    if (!target || target instanceof TagsRootNode || target instanceof TagNode) {
+      return; // a tag row is not a place on disk
     }
     const raw = await data.get('text/uri-list')?.asString();
     if (!raw) {

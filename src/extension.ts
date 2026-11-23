@@ -13,7 +13,10 @@ import { ThumbService } from './thumbs';
 import { EditStore } from './edits';
 import { BackgroundThumbnails } from './background';
 import { AutoRanker } from './autorank';
-import { FolderNode, LibraryNode, LibraryTree, TreeNode } from './tree';
+import { FolderNode, LibraryNode, LibraryTree, TagNode, TreeNode } from './tree';
+import { TagIndex } from './tagIndex';
+import { applyTags, describeResult, TagScanner } from './tags';
+import { TagSource } from './photoSource';
 import { PhotoViewers } from './viewer';
 
 /** Settings keys that were called `vsphoto.*` before the project was renamed to Polaroica. */
@@ -65,6 +68,8 @@ export function activate(context: vscode.ExtensionContext): void {
   const edits = new EditStore(cache);
   const mover = new Mover(context, libraries, store, edits);
   const deleter = new Deleter(libraries, store, edits);
+  const tagIndex = new TagIndex(context.globalStorageUri.fsPath);
+  const tagScanner = new TagScanner(store, edits, tagIndex);
   const grids = new GridPanels(context, libraries, store, mover, thumbs, edits);
   const viewers = new PhotoViewers(context, libraries, store, mover, thumbs, edits);
   const exporter = new PhotoExporter(context, libraries, store, edits, (line) =>
@@ -100,6 +105,7 @@ export function activate(context: vscode.ExtensionContext): void {
   });
   tree.media = vscode.Uri.joinPath(context.extensionUri, 'media');
   tree.cullingIn = (folder) => edits.cullingIn(folder);
+  tree.tags = tagIndex;
   context.subscriptions.push(edits.onDidChange((photo) => tree.cullingChanged(path.dirname(photo.fsPath))));
   const view = vscode.window.createTreeView('polaroica.libraries', {
     treeDataProvider: tree,
@@ -112,7 +118,11 @@ export function activate(context: vscode.ExtensionContext): void {
   mover.onDidMove((r) => {
     for (const m of r.moved) {
       grids.closeFor(m.from);
+      // The sidecar went with the photo; the index has to follow or the tag points nowhere.
+      void tagIndex.forgetUnder(m.from.fsPath);
     }
+    tree.tagsChanged();
+    grids.reloadTagGrids();
   });
 
   const uriOf = (arg: unknown): vscode.Uri | undefined => {
@@ -122,7 +132,8 @@ export function activate(context: vscode.ExtensionContext): void {
     if (arg instanceof LibraryNode || arg instanceof FolderNode) {
       return arg.uri;
     }
-    return view.selection[0]?.uri;
+    const sel = view.selection[0];
+    return sel instanceof LibraryNode || sel instanceof FolderNode ? sel.uri : undefined;
   };
 
   // Watch libraries for changes made outside the extension (may not fire on every SMB server).
@@ -140,6 +151,7 @@ export function activate(context: vscode.ExtensionContext): void {
   rewatch();
 
   context.subscriptions.push(
+    new vscode.Disposable(() => void tagIndex.flush()),
     store,
     edits,
     grids,
@@ -282,6 +294,153 @@ export function activate(context: vscode.ExtensionContext): void {
         await libraries.remove(target.folder);
       }
     }),
+    vscode.commands.registerCommand('polaroica.scanTags', async (arg?: unknown) => {
+      let uri = uriOf(arg);
+      if (!uri) {
+        // From the palette with nothing selected in the tree: ask which library to look through.
+        const libs = libraries.all;
+        if (!libs.length) {
+          void vscode.window.showInformationMessage('Add a photo library first.');
+          return;
+        }
+        if (libs.length === 1) {
+          uri = libs[0].uri;
+        } else {
+          const pick = await vscode.window.showQuickPick(
+            libs.map((l) => ({ label: l.name, description: l.uri.fsPath, uri: l.uri })),
+            { title: 'Look for documents and screenshots in…' },
+          );
+          if (!pick) {
+            return;
+          }
+          uri = pick.uri;
+        }
+      }
+      const result = await tagScanner.scan(uri, true);
+      tree.tagsChanged();
+      grids.reloadTagGrids();
+      const tags = [...result.byTag.keys()];
+      const open = tags.length === 1 ? `Show ${tags[0]}` : undefined;
+      const pick = await vscode.window.showInformationMessage(describeResult(result), ...(open ? [open] : []));
+      if (open && pick === open) {
+        grids.openSource(new TagSource(tags[0], tagIndex, libraries));
+      }
+    }),
+    vscode.commands.registerCommand('polaroica.photoTag', async (ctx?: { webview?: string; photo?: string }) => {
+      if (ctx?.webview !== 'polaroica.grid') {
+        return;
+      }
+      const photos = grids.selectionFor(ctx.photo);
+      if (!photos.length) {
+        return;
+      }
+      // Offer the tags already in use, and let a new one be typed. A tag some of the selection
+      // already has says so, so it's clear what adding it will change.
+      const counts = await tagIndex.allTags();
+      const mine = await tagsOfAll(edits, photos);
+      const NEW = '$(add) New tag…';
+      const pick = await vscode.window.showQuickPick(
+        [
+          ...counts.map((c) => ({
+            label: c.tag,
+            description: onHowMany(mine, c.tag, photos.length) ?? `${c.photos.toLocaleString()} photos`,
+          })),
+          { label: NEW, description: '' },
+        ],
+        { title: `Tag ${photos.length === 1 ? '1 photo' : `${photos.length} photos`}` },
+      );
+      if (!pick) {
+        return;
+      }
+      let tag = pick.label;
+      if (tag === NEW) {
+        const typed = await vscode.window.showInputBox({
+          title: 'New tag',
+          prompt: 'A keyword to find these photos by later',
+          validateInput: (v) => (v.trim() ? undefined : 'Type a tag'),
+        });
+        if (!typed?.trim()) {
+          return;
+        }
+        tag = typed.trim();
+      }
+      // Already on every one of them: take the tag off instead, so the menu toggles.
+      const have = tag === pick.label ? mine : await tagsOfAll(edits, photos);
+      const all = have.every((ts) => ts.some((t) => t.toLowerCase() === tag.toLowerCase()));
+      await applyTags(edits, tagIndex, photos, all ? { remove: [tag] } : { add: [tag] });
+      tree.tagsChanged();
+      grids.reloadTagGrids();
+      void vscode.window.showInformationMessage(
+        `${all ? 'Removed' : 'Added'} "${tag}" ${all ? 'from' : 'to'} ${photos.length === 1 ? '1 photo' : `${photos.length} photos`}.`,
+      );
+    }),
+    vscode.commands.registerCommand('polaroica.photoUntag', async (ctx?: { webview?: string; photo?: string }) => {
+      if (ctx?.webview !== 'polaroica.grid') {
+        return;
+      }
+      const photos = grids.selectionFor(ctx.photo);
+      if (!photos.length) {
+        return;
+      }
+      // Only the tags the selection actually carries can be taken off it.
+      const mine = await tagsOfAll(edits, photos);
+      const here = new Map<string, string>();
+      for (const ts of mine) {
+        for (const t of ts) {
+          if (!here.has(t.toLowerCase())) {
+            here.set(t.toLowerCase(), t);
+          }
+        }
+      }
+      if (!here.size) {
+        void vscode.window.showInformationMessage(
+          photos.length === 1 ? 'That photo has no tags.' : 'None of those photos has a tag.',
+        );
+        return;
+      }
+      const picks = await vscode.window.showQuickPick(
+        [...here.values()].sort((a, b) => a.localeCompare(b)).map((tag) => ({
+          label: tag,
+          description: onHowMany(mine, tag, photos.length),
+        })),
+        {
+          title: `Remove tags from ${photos.length === 1 ? '1 photo' : `${photos.length} photos`}`,
+          canPickMany: true,
+          placeHolder: 'Pick the tags to take off',
+        },
+      );
+      if (!picks?.length) {
+        return;
+      }
+      const tags = picks.map((p) => p.label);
+      await applyTags(edits, tagIndex, photos, { remove: tags });
+      tree.tagsChanged();
+      grids.reloadTagGrids();
+      void vscode.window.showInformationMessage(
+        `Removed ${tags.map((t) => `"${t}"`).join(', ')} from ${
+          photos.length === 1 ? '1 photo' : `${photos.length} photos`
+        }.`,
+      );
+    }),
+    vscode.commands.registerCommand('polaroica.openTag', async (arg?: unknown) => {
+      const tag = typeof arg === 'string' ? arg : arg instanceof TagNode ? arg.tag : undefined;
+      if (tag) {
+        grids.openSource(new TagSource(tag, tagIndex, libraries));
+        return;
+      }
+      const counts = await tagIndex.allTags();
+      if (!counts.length) {
+        void vscode.window.showInformationMessage('No tags yet. Right-click a library and choose "Find Documents and Screenshots".');
+        return;
+      }
+      const pick = await vscode.window.showQuickPick(
+        counts.map((c) => ({ label: c.tag, description: `${c.photos.toLocaleString()} photos` })),
+        { title: 'Show photos tagged…' },
+      );
+      if (pick) {
+        grids.openSource(new TagSource(pick.label, tagIndex, libraries));
+      }
+    }),
     vscode.commands.registerCommand('polaroica.openFolder', (arg?: unknown) => {
       const uri = uriOf(arg);
       if (uri) {
@@ -344,4 +503,18 @@ export function activate(context: vscode.ExtensionContext): void {
 
 export function deactivate(): void {
   disposeCodecs();
+}
+
+/** Each photo's tags, in the order given. */
+async function tagsOfAll(edits: EditStore, photos: vscode.Uri[]): Promise<string[][]> {
+  return Promise.all(photos.map((u) => edits.tagsOf(u)));
+}
+
+/** "on 3 of 7" for a tag part of the selection carries, undefined when none of it does. */
+function onHowMany(have: string[][], tag: string, total: number): string | undefined {
+  const n = have.filter((ts) => ts.some((t) => t.toLowerCase() === tag.toLowerCase())).length;
+  if (!n) {
+    return undefined;
+  }
+  return n === total ? (total === 1 ? 'on this photo' : 'on all of them') : `on ${n} of ${total}`;
 }

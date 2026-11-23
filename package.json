@@ -188,6 +188,30 @@
         "title": "Copy Path",
         "category": "Polaroica",
         "icon": "$(clippy)"
+      },
+      {
+        "command": "polaroica.scanTags",
+        "title": "Find Documents and Screenshots…",
+        "category": "Polaroica",
+        "icon": "$(search)"
+      },
+      {
+        "command": "polaroica.openTag",
+        "title": "Show Tagged Photos…",
+        "category": "Polaroica",
+        "icon": "$(tag)"
+      },
+      {
+        "command": "polaroica.photoTag",
+        "title": "Tag…",
+        "category": "Polaroica",
+        "icon": "$(tag)"
+      },
+      {
+        "command": "polaroica.photoUntag",
+        "title": "Remove Tags…",
+        "category": "Polaroica",
+        "icon": "$(tag)"
       }
     ],
     "menus": {
@@ -258,6 +282,16 @@
           "submenu": "polaroica.copy",
           "when": "view == polaroica.libraries && viewItem =~ /^(library|folder)$/",
           "group": "3_reveal@2"
+        },
+        {
+          "command": "polaroica.scanTags",
+          "when": "view == polaroica.libraries && viewItem =~ /^(library|folder)$/",
+          "group": "4_thumbs@2"
+        },
+        {
+          "command": "polaroica.openTag",
+          "when": "view == polaroica.libraries && viewItem == tag",
+          "group": "1_open@1"
         }
       ],
       "commandPalette": [
@@ -300,6 +334,14 @@
         {
           "command": "polaroica.photoCopyPath",
           "when": "false"
+        },
+        {
+          "command": "polaroica.photoTag",
+          "when": "false"
+        },
+        {
+          "command": "polaroica.photoUntag",
+          "when": "false"
         }
       ],
       "webview/context": [
@@ -322,6 +364,16 @@
           "submenu": "polaroica.copy",
           "when": "(webviewId == 'polaroica.grid' || webviewId == 'polaroica.photo') && webviewSection == 'photo'",
           "group": "1_photo@4"
+        },
+        {
+          "command": "polaroica.photoTag",
+          "when": "webviewId == 'polaroica.grid' && webviewSection == 'photo'",
+          "group": "1_photo@5"
+        },
+        {
+          "command": "polaroica.photoUntag",
+          "when": "webviewId == 'polaroica.grid' && webviewSection == 'photo'",
+          "group": "1_photo@6"
         }
       ],
       "polaroica.copy": [

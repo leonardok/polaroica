@@ -5,8 +5,9 @@ import { detailRows, toView } from './details';
 import { Libraries } from './libraries';
 import { Mover } from './move';
 import { Photo, PhotoStore, sortSetting } from './photoStore';
+import { FolderSource, GridPhoto, PhotoSource } from './photoSource';
 import { Thumb } from './core/cache';
-import { ThumbJob, ThumbService } from './thumbs';
+import { JobPhoto, ThumbJob, ThumbService } from './thumbs';
 import { EditStore } from './edits';
 import { PhotoExporter } from './export';
 import { DETAILS_WIDTH, fromWire, localRoots, post, webviewHtml } from './webview';
@@ -64,7 +65,7 @@ export class GridPanels implements vscode.Disposable {
     context.subscriptions.push(
       store.onDidChange((folder) => {
         for (const p of this.panels.values()) {
-          if (!folder || folder.fsPath === p.folder.fsPath) {
+          if (!folder || p.covers(folder)) {
             void p.reload();
           }
         }
@@ -72,12 +73,15 @@ export class GridPanels implements vscode.Disposable {
       ...(edits
         ? [
             edits.onDidChange((photo) => {
-              const grid = this.panels.get(path.dirname(photo.fsPath));
-              if (grid) {
+              for (const grid of this.panels.values()) {
+                const key = grid.keyOf(photo);
+                if (!key) {
+                  continue;
+                }
                 const name = path.basename(photo.fsPath);
-                void edits.cullingIn(grid.folder.fsPath).then((map) => {
-                  post(grid.panel.webview, { type: 'cull', name, cull: map.get(name) ?? null });
-                  grid.cull.set(name, map.get(name));
+                void edits.cullingIn(path.dirname(photo.fsPath)).then((map) => {
+                  post(grid.panel.webview, { type: 'cull', name: key, cull: map.get(name) ?? null });
+                  grid.cull.set(key, map.get(name));
                   this.updateStatus();
                 });
               }
@@ -99,16 +103,22 @@ export class GridPanels implements vscode.Disposable {
   /** Set by the extension: an album was opened (or brought back to the front). */
   onOpen?: (folder: vscode.Uri) => void;
 
+  /** Opens a folder's grid (the Libraries tree, and opening a photo's album). */
   open(folder: vscode.Uri): void {
     this.onOpen?.(folder);
-    const existing = this.panels.get(folder.fsPath);
+    this.openSource(new FolderSource(folder, this.store, this.libraries));
+  }
+
+  /** Opens any grid: a folder, or every photo carrying a tag. */
+  openSource(source: PhotoSource): void {
+    const existing = this.panels.get(source.id);
     if (existing) {
       existing.panel.reveal();
       return;
     }
     const panel = vscode.window.createWebviewPanel(
       'polaroica.grid',
-      path.basename(folder.fsPath) || folder.fsPath,
+      source.title,
       { viewColumn: vscode.ViewColumn.Active, preserveFocus: false },
       { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: localRoots(this.context.extensionUri) },
     );
@@ -116,11 +126,11 @@ export class GridPanels implements vscode.Disposable {
       light: vscode.Uri.joinPath(this.context.extensionUri, 'media', 'grid-light.svg'),
       dark: vscode.Uri.joinPath(this.context.extensionUri, 'media', 'grid-dark.svg'),
     };
-    const grid = new GridPanel(panel, folder, this);
-    this.panels.set(folder.fsPath, grid);
+    const grid = new GridPanel(panel, source, this);
+    this.panels.set(source.id, grid);
     panel.onDidDispose(() => {
       grid.dispose();
-      this.panels.delete(folder.fsPath);
+      this.panels.delete(source.id);
       this.updateStatus();
     });
     panel.onDidChangeViewState((e) => {
@@ -139,40 +149,74 @@ export class GridPanels implements vscode.Disposable {
     if (!grid || !name) {
       return;
     }
-    const uriOf = (n: string) => vscode.Uri.file(path.join(grid.folder.fsPath, n));
-    if (action === 'reveal') {
-      await vscode.commands.executeCommand('revealFileInOS', uriOf(name));
-    } else if (action === 'copyPath') {
-      await vscode.env.clipboard.writeText(uriOf(name).fsPath);
-    } else if (action === 'export') {
-      const names = grid.selected.includes(name) ? grid.selected : [name];
-      await this.exporter?.exportPhotos(names.map(uriOf), grid.folder);
-    } else {
-      const names = grid.selected.includes(name) ? grid.selected : [name];
-      await this.mover.moveWithPicker(names.map(uriOf));
+    const target = grid.uriOf(name);
+    if (!target) {
+      return;
     }
+    const keys = grid.selected.includes(name) ? grid.selected : [name];
+    const uris = keys.map((k) => grid.uriOf(k)).filter((u): u is vscode.Uri => !!u);
+    if (action === 'reveal') {
+      await vscode.commands.executeCommand('revealFileInOS', target);
+    } else if (action === 'copyPath') {
+      await vscode.env.clipboard.writeText(target.fsPath);
+    } else if (action === 'export') {
+      // A tag album spans folders: fall back to the photo's own folder as the export base.
+      await this.exporter?.exportPhotos(uris, grid.source.folder ?? vscode.Uri.file(path.dirname(target.fsPath)));
+    } else {
+      await this.mover.moveWithPicker(uris);
+    }
+  }
+
+  /**
+   * The photos a right-click in the active grid acts on: the selection when it holds the clicked
+   * photo, else just that one. Empty when no grid is in front.
+   */
+  selectionFor(name: string | undefined): vscode.Uri[] {
+    const grid = [...this.panels.values()].find((p) => p.panel.active);
+    if (!grid || !name) {
+      return [];
+    }
+    const keys = grid.selected.includes(name) ? grid.selected : [name];
+    return keys.map((k) => grid.uriOf(k)).filter((u): u is vscode.Uri => !!u);
   }
 
   /** Face metrics for a photo, via the grid tab of its folder (opened if needed). */
   async detectFaces(folder: vscode.Uri, pixels: Rgba, models: FaceModels): Promise<{ faces?: FaceMetric[]; error?: string }> {
-    if (!this.panels.get(folder.fsPath)) {
+    const id = FolderSource.idFor(folder);
+    if (!this.panels.get(id)) {
       this.open(folder);
     }
-    const grid = this.panels.get(folder.fsPath);
+    const grid = this.panels.get(id);
     return grid ? grid.detectFaces(pixels, models) : { error: 'the grid tab could not be opened' };
   }
 
-  /** A thumbnail made by the background builder: show it in an open grid of its folder. */
-  offer(photo: Photo, t: Thumb): void {
-    const grid = this.panels.get(path.dirname(photo.uri.fsPath));
-    grid?.job.offer(photo, t);
+  /**
+   * Tags changed: re-read every open tag album, since which photos belong in it has changed. A
+   * folder album is unaffected — its contents don't depend on tags.
+   */
+  reloadTagGrids(): void {
+    for (const p of this.panels.values()) {
+      if (p.source.kind === 'tag') {
+        void p.reload();
+      }
+    }
   }
 
-  /** Forget panels for a folder that was moved away. */
+  /** A thumbnail made by the background builder: show it in any open grid holding that photo. */
+  offer(photo: Photo, t: Thumb): void {
+    for (const grid of this.panels.values()) {
+      grid.job.offer(photo, t);
+    }
+  }
+
+  /** Forget panels for a folder that was moved away; reload tag albums that showed its photos. */
   closeFor(folder: vscode.Uri): void {
-    for (const [k, p] of this.panels) {
-      if (k === folder.fsPath || k.startsWith(folder.fsPath + path.sep)) {
+    for (const p of [...this.panels.values()]) {
+      const own = p.source.folder?.fsPath;
+      if (own && (own === folder.fsPath || own.startsWith(folder.fsPath + path.sep))) {
         p.panel.dispose();
+      } else if (p.source.kind === 'tag') {
+        void p.reload();
       }
     }
   }
@@ -183,22 +227,24 @@ export class GridPanels implements vscode.Disposable {
       this.status.hide();
       return;
     }
-    const lib = this.libraries.libraryOf(active.folder);
+    const ref = active.source.folder ?? active.photos[0]?.photo.uri;
+    const lib = ref && this.libraries.libraryOf(ref);
     const n = active.photos.length;
     const sel = active.selected.length;
     let picks = 0;
     let rejects = 0;
     for (const p of active.photos) {
-      const c = active.cull.get(p.name);
+      const c = active.cull.get(p.key);
       if (c?.flag === 'pick') picks++;
       else if (c?.flag === 'reject') rejects++;
     }
+    const icon = active.source.kind === 'tag' ? 'tag' : lib && this.libraries.kind(lib) === 'smb' ? 'server' : 'device-desktop';
     this.status.text =
-      `$(${lib && this.libraries.kind(lib) === 'smb' ? 'server' : 'device-desktop'}) ${n.toLocaleString()} photo${n === 1 ? '' : 's'}` +
+      `$(${icon}) ${n.toLocaleString()} photo${n === 1 ? '' : 's'}` +
       (picks ? ` · ${picks} picks` : '') +
       (rejects ? ` · ${rejects} rejects` : '') +
       (sel ? ` · ${sel} selected` : '');
-    this.status.tooltip = active.folder.fsPath;
+    this.status.tooltip = active.source.folder?.fsPath ?? `Photos tagged ${active.source.title}`;
     this.status.show();
   }
 
@@ -216,10 +262,13 @@ export class GridPanels implements vscode.Disposable {
 }
 
 class GridPanel {
-  photos: Photo[] = [];
+  photos: GridPhoto[] = [];
+  /** Keys of the selected photos. */
   selected: string[] = [];
-  /** Ratings and flags of this folder's photos (for the status bar). */
+  /** Ratings and flags of the grid's photos, by key (for the status bar). */
   cull = new Map<string, import('./edits').CullInfo | undefined>();
+  /** key -> photo, for everything the webview asks about. */
+  private byKey = new Map<string, GridPhoto>();
   private sort: SortKey = sortSetting();
   private focus?: string;
   readonly job: ThumbJob;
@@ -234,19 +283,19 @@ class GridPanel {
 
   constructor(
     readonly panel: vscode.WebviewPanel,
-    readonly folder: vscode.Uri,
+    readonly source: PhotoSource,
     private readonly owner: GridPanels,
   ) {
     const { context } = owner.ctx;
     panel.webview.html = webviewHtml(panel.webview, context.extensionUri, {
-      title: path.basename(folder.fsPath),
+      title: source.title,
       script: ['faces.js', 'grid.js'],
       style: 'grid.css',
       body: '<div id="app"></div>',
       faces: true,
     });
     panel.webview.onDidReceiveMessage((m: FromGrid) => this.onMessage(m));
-    this.job = owner.ctx.thumbs.job(folder, {
+    this.job = owner.ctx.thumbs.job({
       send: (items) => void post(panel.webview, { type: 'thumbs', items }),
       decode: (name, data, mime, px) =>
         new Promise<Thumb | undefined>((resolve) => {
@@ -265,6 +314,29 @@ class GridPanel {
         return panel.visible;
       },
     });
+  }
+
+  /** The photo a key names, when this grid still holds it. */
+  uriOf(key: string): vscode.Uri | undefined {
+    return this.byKey.get(key)?.photo.uri;
+  }
+
+  /** The key this grid knows a photo by, when it holds it. */
+  keyOf(photo: vscode.Uri): string | undefined {
+    for (const p of this.photos) {
+      if (p.photo.uri.fsPath === photo.fsPath) {
+        return p.key;
+      }
+    }
+    return undefined;
+  }
+
+  /** True when a change to `folder` could change what this grid shows. */
+  covers(folder: vscode.Uri): boolean {
+    if (this.source.folder) {
+      return this.source.folder.fsPath === folder.fsPath;
+    }
+    return this.photos.some((p) => path.dirname(p.photo.uri.fsPath) === folder.fsPath);
   }
 
   /** Runs the face model on a photo in this tab (MediaPipe needs a browser page). */
@@ -335,52 +407,74 @@ class GridPanel {
   }
 
   async reload(): Promise<void> {
-    const { store, libraries } = this.owner.ctx;
+    const { store } = this.owner.ctx;
     try {
-      this.photos = await store.photos(this.folder, this.sort);
+      this.photos = await this.source.photos(this.sort);
     } catch (err) {
-      void post(this.webview, { type: 'error', message: `Can't read ${this.folder.fsPath}: ${String(err)}` });
+      void post(this.webview, { type: 'error', message: `Can't read ${this.source.title}: ${String(err)}` });
       return;
     }
-    const names = new Set(this.photos.map((p) => p.name));
-    this.selected = this.selected.filter((n) => names.has(n));
+    this.byKey = new Map(this.photos.map((p) => [p.key, p]));
+    this.selected = this.selected.filter((k) => this.byKey.has(k));
     const tileSize = this.owner.ctx.context.globalState.get<number>('polaroica.tileSize', 160);
-    const cull = (await this.owner.ctx.edits?.cullingIn(this.folder.fsPath)) ?? new Map();
-    this.cull = new Map(cull);
-    // Each photo's shape, so the justified grid is laid out right before thumbnails arrive.
-    const fc = await store.cache.folder(this.folder.fsPath);
-    const ratio = (p: Photo) => {
-      const r = fc.aspect(p.name, p.size, p.mtime);
-      return r ? Math.round(r * 1000) / 1000 : undefined;
-    };
+    // Ratings and shapes come from each photo's own folder, which in a tag album is not just one.
+    const folders = [...new Set(this.photos.map((p) => path.dirname(p.photo.uri.fsPath)))];
+    const culls = new Map(
+      await Promise.all(
+        folders.map(async (f) => [f, (await this.owner.ctx.edits?.cullingIn(f)) ?? new Map()] as const),
+      ),
+    );
+    const caches = new Map(await Promise.all(folders.map(async (f) => [f, await store.cache.folder(f)] as const)));
+    this.cull = new Map();
+    const view = this.photos.map((p) => {
+      const dir = path.dirname(p.photo.uri.fsPath);
+      const cull = culls.get(dir)?.get(p.photo.name) ?? null;
+      this.cull.set(p.key, cull ?? undefined);
+      // The photo's shape, so the justified grid is laid out right before thumbnails arrive.
+      const r = caches.get(dir)?.aspect(p.photo.name, p.photo.size, p.photo.mtime);
+      return {
+        ...toView(this.webview, p.photo),
+        src: undefined,
+        name: p.key,
+        label: p.label,
+        sub: p.sub,
+        cull,
+        ratio: r ? Math.round(r * 1000) / 1000 : undefined,
+      };
+    });
     void post(this.webview, {
       type: 'init',
-      crumbs: libraries.crumbs(this.folder),
+      crumbs: this.source.crumbs(),
+      album: this.source.kind,
       sort: this.sort,
       tileSize,
       detailsWidth: this.owner.ctx.context.globalState.get<number>(DETAILS_WIDTH, 0),
       selected: this.selected,
-      photos: this.photos.map((p) => ({ ...toView(this.webview, p), src: undefined, cull: cull.get(p.name) ?? null, ratio: ratio(p) })),
+      photos: view,
     });
     this.owner.updateStatus();
-    this.job.setPhotos(this.photos);
+    this.job.setPhotos(this.photos.map((p): JobPhoto => ({ key: p.key, photo: p.photo })));
     // Shown from the local index: check the share for edited files in the background.
-    void store.revalidate(this.folder, true);
+    if (this.source.folder) {
+      void store.revalidate(this.source.folder, true);
+    }
     await this.sendDetails();
   }
 
   private async sendDetails(): Promise<void> {
-    const name = this.focus && this.selected.includes(this.focus) ? this.focus : this.selected[this.selected.length - 1];
-    const photo = this.photos.find((p) => p.name === name);
-    if (!photo) {
+    const key = this.focus && this.selected.includes(this.focus) ? this.focus : this.selected[this.selected.length - 1];
+    const item = key ? this.byKey.get(key) : undefined;
+    if (!item) {
       void post(this.webview, { type: 'details', details: undefined });
       return;
     }
+    const photo = item.photo;
     const [rows, thumbs] = await Promise.all([
       detailRows(this.owner.ctx.store, photo),
-      this.owner.ctx.thumbs.cached(this.folder, [photo]),
+      this.owner.ctx.thumbs.cached(vscode.Uri.file(path.dirname(photo.uri.fsPath)), [photo]),
     ]);
-    const view = { ...toView(this.webview, photo), src: undefined }; // never load the original here
+    // never load the original here
+    const view = { ...toView(this.webview, photo), src: undefined, name: item.key, label: item.label, sub: item.sub };
     void post(this.webview, {
       type: 'details',
       details: { photo: view, rows, more: this.selected.length - 1, thumb: thumbs.get(photo.name)?.data },
@@ -389,14 +483,21 @@ class GridPanel {
 
   private async onMessage(m: FromGrid): Promise<void> {
     const { mover, host, context } = this.owner.ctx;
-    const uriOf = (n: string) => vscode.Uri.file(path.join(this.folder.fsPath, n));
+    const uriOf = (k: string) => this.byKey.get(k)?.photo.uri;
+    const uris = (keys: string[]) => keys.map(uriOf).filter((u): u is vscode.Uri => !!u);
+    /** The folder this grid *is*; album-wide actions are only offered for one. */
+    const own = this.source.folder;
     switch (m.type) {
       case 'ready':
         this.markReady();
         await this.reload();
         break;
       case 'refresh':
-        await this.owner.ctx.store.recheck(this.folder);
+        if (own) {
+          await this.owner.ctx.store.recheck(own);
+        } else {
+          await this.reload();
+        }
         break;
       case 'onscreen':
         this.job.setVisible(m.names);
@@ -410,9 +511,13 @@ class GridPanel {
         resolve?.(ok && m.w && m.h ? { data: data!, w: m.w, h: m.h } : undefined);
         break;
       }
-      case 'open':
-        host?.openPhoto(this.folder, m.name, this.sort);
+      case 'open': {
+        const uri = uriOf(m.name);
+        if (uri) {
+          host?.openPhoto(vscode.Uri.file(path.dirname(uri.fsPath)), path.basename(uri.fsPath), this.sort);
+        }
         break;
+      }
       case 'select':
         this.selected = m.names;
         this.focus = m.focus;
@@ -420,11 +525,15 @@ class GridPanel {
         await this.sendDetails();
         break;
       case 'move':
-        await mover.moveWithPicker(m.names.map(uriOf));
+        await mover.moveWithPicker(uris(m.names));
         break;
-      case 'reveal':
-        await vscode.commands.executeCommand('revealFileInOS', uriOf(m.name));
+      case 'reveal': {
+        const uri = uriOf(m.name);
+        if (uri) {
+          await vscode.commands.executeCommand('revealFileInOS', uri);
+        }
         break;
+      }
       case 'sort':
         this.sort = m.key;
         await this.reload();
@@ -435,23 +544,24 @@ class GridPanel {
           const change: { rating?: number; flag?: 'pick' | 'reject' | null } = {};
           if (m.rating !== undefined) change.rating = m.rating;
           if (m.flag !== undefined) change.flag = m.flag;
-          await edits.rate(m.names.map(uriOf), change).catch((err) => {
+          await edits.rate(uris(m.names), change).catch((err) => {
             void vscode.window.showErrorMessage(`Could not save the rating: ${err instanceof Error ? err.message : String(err)}`);
           });
         }
         break;
       }
+      // Album-wide actions need a real folder; the webview hides them in a tag album.
       case 'autoRank':
-        host?.autoRank?.(this.folder);
+        if (own) host?.autoRank?.(own);
         break;
       case 'undoAutoRank':
-        host?.undoAutoRank?.(this.folder);
+        if (own) host?.undoAutoRank?.(own);
         break;
       case 'deleteRejected':
-        host?.deleteRejected?.(this.folder);
+        if (own) host?.deleteRejected?.(own);
         break;
       case 'export':
-        host?.exportPhotos?.(this.folder, this.selected);
+        if (own) host?.exportPhotos?.(own, this.selected);
         break;
       case 'facesResult': {
         const r = this.pendingFaces.get(m.id);
@@ -460,7 +570,7 @@ class GridPanel {
         break;
       }
       case 'makeBest':
-        host?.makeBest?.(this.folder, m.name);
+        if (own) host?.makeBest?.(own, m.name);
         break;
       case 'tileSize':
         await context.globalState.update('polaroica.tileSize', m.size);

@@ -1,6 +1,18 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { defaultEdits, fromXmp, isDefault, normalizeEdits, toXmp } from '../core/xmp';
+import {
+  defaultEdits,
+  emptySidecar,
+  fromXmp,
+  isDefault,
+  isEmptySidecar,
+  normalizeEdits,
+  normalizeTags,
+  readSidecar,
+  sameTag,
+  Sidecar,
+  toXmp,
+} from '../core/xmp';
 
 test('edits round-trip through the XMP sidecar', () => {
   const e = defaultEdits();
@@ -72,4 +84,68 @@ test('sidecars written before the rename (vsphoto: prefix) are still read', asyn
   assert.equal(sc.rating, 4);
   assert.equal(sc.flag, 'pick');
   assert.deepEqual(sc.auto, { focus: 80 });
+});
+
+test('tags round-trip as a dc:subject bag, and auto tags are marked', () => {
+  const sc: Sidecar = { ...emptySidecar(), tags: ['Screenshot', 'Receipts'], autoTags: ['Screenshot'] };
+  const xml = toXmp(sc);
+  assert.match(xml, /xmlns:dc="http:\/\/purl\.org\/dc\/elements\/1\.1\//);
+  assert.match(xml, /<dc:subject>/);
+  assert.match(xml, /<rdf:li>Screenshot<\/rdf:li>/);
+  assert.match(xml, /<rdf:li>Receipts<\/rdf:li>/);
+  const back = readSidecar(xml);
+  assert.deepEqual(back.tags, ['Screenshot', 'Receipts']);
+  assert.deepEqual(back.autoTags, ['Screenshot']);
+  // Tags alone are enough to keep a sidecar: it isn't "empty".
+  assert.ok(!isEmptySidecar(sc));
+  assert.ok(isEmptySidecar(emptySidecar()));
+});
+
+test('a sidecar with no tags writes no dc:subject', () => {
+  const xml = toXmp(emptySidecar());
+  assert.ok(!xml.includes('dc:subject'));
+  assert.equal(readSidecar(xml).tags, undefined);
+});
+
+test('tags are trimmed, de-duplicated case-insensitively, and keep their order', () => {
+  assert.deepEqual(normalizeTags([' Screenshot ', 'screenshot', 'Receipts', '', '  ', 'RECEIPTS']), ['Screenshot', 'Receipts']);
+  assert.deepEqual(normalizeTags(['Bank  statements']), ['Bank statements']);
+  assert.ok(sameTag('Screenshot', ' screenshot '));
+  assert.ok(!sameTag('Screenshot', 'Screenshots'));
+  // A repeat in the file is collapsed on the way back out.
+  const back = readSidecar(toXmp({ ...emptySidecar(), tags: ['Doc', 'doc'] }));
+  assert.deepEqual(back.tags, ['Doc']);
+});
+
+test('tags with XML characters survive the round trip', () => {
+  const tags = ['Bills & Receipts', '<Scans>', 'A "quoted" one'];
+  const back = readSidecar(toXmp({ ...emptySidecar(), tags }));
+  assert.deepEqual(back.tags, tags);
+});
+
+test('an AutoTags mark for a tag that is gone is ignored', () => {
+  // Hand-edited, or a tag removed elsewhere: the mark must not resurrect it.
+  const xml = toXmp({ ...emptySidecar(), tags: ['Receipts'] }).replace(
+    'crs:HasSettings="True"',
+    'crs:HasSettings="True"\n   polaroica:AutoTags="[&quot;Screenshot&quot;]"',
+  );
+  const back = readSidecar(xml);
+  assert.deepEqual(back.tags, ['Receipts']);
+  assert.equal(back.autoTags, undefined);
+});
+
+test('a dc:subject attribute written by another program is read as a list', () => {
+  const xml = toXmp(emptySidecar()).replace('crs:HasSettings="True"', 'crs:HasSettings="True"\n   dc:subject="Screenshot; Receipts"');
+  assert.deepEqual(readSidecar(xml).tags, ['Screenshot', 'Receipts']);
+});
+
+test('tags do not disturb the edits, rating or flag in the same sidecar', () => {
+  const edits = defaultEdits();
+  edits.exposure = 0.5;
+  const sc: Sidecar = { edits, rating: 4, flag: 'pick', tags: ['Screenshot'] };
+  const back = readSidecar(toXmp(sc));
+  assert.equal(back.rating, 4);
+  assert.equal(back.flag, 'pick');
+  assert.equal(back.edits.exposure, 0.5);
+  assert.deepEqual(back.tags, ['Screenshot']);
 });

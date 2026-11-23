@@ -95,6 +95,15 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Which folder the photo is in: shown in a tag album, where the photos come from many. */
+.tile .label .sub {
+  display: block;
+  font-size: 10px;
+  opacity: 0.7;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .tile:hover .thumb {
   outline-color: var(--vscode-list-hoverBackground);
 }

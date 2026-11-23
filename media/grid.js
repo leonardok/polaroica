@@ -9,6 +9,9 @@
   let anchor = -1; // index for shift-click ranges
   let focusIndex = -1;
   let sort = 'name';
+  // 'folder' (one album) or 'tag' (every photo carrying a tag, from any folder). A tag album has
+  // no single folder, so album-wide actions are left out of the toolbar.
+  let album = 'folder';
   let tileSize = (vscode.getState() || {}).tileSize || 160;
   /** Culling view: which photos show. Remembered per tab. */
   let view = Object.assign({ filter: 'all', hideRejects: false, minStars: 0, stack: true }, (vscode.getState() || {}).view || {});
@@ -277,9 +280,13 @@
       ...[
       h('span', { class: 'menu-anchor' }, menuBtn, menuOpen ? menuEl : null),
       h('span', { class: 'sep', 'aria-hidden': 'true' }),
-      iconBtn('spark', 'Auto-Rank this album (focus, exposure, similar shots)…', () => post({ type: 'autoRank' })),
-      iconBtn('export', 'Export to JPEG (the selection, picks, by stars…) with your adjustments…', () => post({ type: 'export' })),
-      n.rejects
+      album === 'folder'
+        ? iconBtn('spark', 'Auto-Rank this album (focus, exposure, similar shots)…', () => post({ type: 'autoRank' }))
+        : null,
+      album === 'folder'
+        ? iconBtn('export', 'Export to JPEG (the selection, picks, by stars…) with your adjustments…', () => post({ type: 'export' }))
+        : null,
+      album === 'folder' && n.rejects
         ? iconBtn('trash', `Delete ${n.rejects} rejected photo${n.rejects === 1 ? '' : 's'} from disk… (asks first)`, () => post({ type: 'deleteRejected' }), n.rejects)
         : null,
       iconBtn('refresh', 'Refresh', () => post({ type: 'refresh' })),
@@ -391,6 +398,7 @@
   function render(state) {
     photos = state.photos;
     sort = state.sort;
+    album = state.album || 'folder';
     if (!(vscode.getState() || {}).tileSize && state.tileSize) {
       tileSize = state.tileSize;
     }
@@ -464,7 +472,7 @@
         {
           class: 'tile',
           role: 'option',
-          title: `${p.name}\nDouble-click to open in a new tab`,
+          title: `${p.label || p.name}${p.sub ? `\n${p.sub}` : ''}\nDouble-click to open in a new tab`,
           draggable: 'true',
           dataset: { i: String(i) },
           onclick: (e) => select(i, e),
@@ -492,7 +500,12 @@
           h('span', { class: 'thumb-label', 'aria-hidden': 'true' }, icon('photo', 20), p.ext || ''),
           h('span', { class: 'badges' }),
         ),
-        h('span', { class: 'label' }, p.name),
+        h(
+          'span',
+          { class: 'label' },
+          p.label || p.name,
+          p.sub ? h('span', { class: 'sub' }, p.sub) : null,
+        ),
       );
       setRatio(tile, p.ratio || 1.5);
       paintTile(tile, p);
@@ -629,7 +642,12 @@
         'details',
         'DETAILS',
         preview,
-        h('div', {}, h('div', { class: 'name', title: d.photo.name }, d.photo.name), d.more > 0 ? h('div', { class: 'sub' }, `+ ${d.more} more selected`) : null),
+        h(
+          'div',
+          {},
+          h('div', { class: 'name', title: d.photo.name }, d.photo.label || d.photo.name),
+          d.more > 0 ? h('div', { class: 'sub' }, `+ ${d.more} more selected`) : null,
+        ),
         ratingBlock,
         detailsList(d.rows),
       ),
