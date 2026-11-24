@@ -66,7 +66,9 @@ next to your photos).
 ## Formats
 
 The grid and photo tabs show JPEG, PNG, GIF, WebP, AVIF, BMP and SVG. Camera RAW files (NEF, CR2,
-ARW, DNG, ORF, RW2, PEF, RAF, …) show the preview JPEG embedded in the file. CR3, TIFF and HEIC
+ARW, DNG, ORF, RW2, PEF, RAF, …) show the preview JPEG embedded in the file. **HEIC and HEIF —
+what an iPhone writes by default — are decoded with libheif**, so they get real thumbnails, open
+in a photo tab, and can be exported to JPEG; their built-in rotation is applied. CR3 and TIFF
 display as a labelled placeholder.
 
 ## Documentation
@@ -96,5 +98,11 @@ GNU General Public License as published by the Free Software Foundation, either 
 License, or (at your option) any later version. See [`LICENSE`](LICENSE).
 
 RAW export uses [LibRaw](https://www.libraw.org/) (LGPL 2.1 / CDDL 1.0) through
-[libraw-wasm](https://github.com/ybouane/LibRaw-Wasm) (ISC). The face models are
+[libraw-wasm](https://github.com/ybouane/LibRaw-Wasm) (ISC). HEIC photos are decoded with
+[libheif](https://github.com/strukturag/libheif) and libde265 (LGPL 3.0) through
+[libheif-js](https://github.com/catdad-experiments/libheif-js). The face models are
 [MediaPipe](https://github.com/google-ai-edge/mediapipe) (Apache-2.0).
+
+Bundling libde265 means Polaroica distributes an HEVC decoder, and HEVC is patent-encumbered.
+[`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) lists every bundled library with its licence and
+explains what that means for anyone redistributing Polaroica.

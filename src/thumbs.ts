@@ -4,7 +4,7 @@ import * as vscode from 'vscode';
 import { QUICK_PX, Thumb } from './core/cache';
 import { makeThumb } from './core/codec';
 import { embeddedPreviews, embeddedThumbnail, isBrowserJpeg, jpegSegments, mpfPreviews, readExif } from './core/exif';
-import { extensionOf, isDisplayable, isRaw } from './core/images';
+import { extensionOf, isDisplayable, isHeif, isRaw } from './core/images';
 import { Photo, PhotoStore, readHead, readRange } from './photoStore';
 
 /** Long edge of generated thumbnails, in pixels. */
@@ -56,8 +56,10 @@ const RAW_HEAD_BYTES = 256 * 1024;
 const LONG_HEAD_BYTES = 512 * 1024;
 const MAX_SOURCE_BYTES = 80 * 1024 * 1024;
 const MAX_PREVIEW_BYTES = 8 * 1024 * 1024;
+/** Long edge of the WebP we hand the photo tab for a HEIC (the file itself it cannot draw). */
+const HEIF_PREVIEW_PX = 2560;
 
-export type SharpSource = 'preview' | 'full' | 'raw-preview' | 'webview';
+export type SharpSource = 'preview' | 'full' | 'raw-preview' | 'heif' | 'webview';
 
 /**
  * Makes and serves thumbnails, kept in the local cache. Two kinds:
@@ -70,7 +72,7 @@ export class ThumbService {
   readonly fgHeads = new Limiter(4);
   readonly fgFulls = new Limiter(2);
   /** How the sharp thumbnails were made, for the progress display. */
-  readonly sources: Record<SharpSource, number> = { preview: 0, full: 0, 'raw-preview': 0, webview: 0 };
+  readonly sources: Record<SharpSource, number> = { preview: 0, full: 0, 'raw-preview': 0, heif: 0, webview: 0 };
 
   constructor(readonly store: PhotoStore) {}
 
@@ -143,6 +145,15 @@ export class ThumbService {
       const head = await heads.run(() => this.head(photo, RAW_HEAD_BYTES));
       const data = head && (await fulls.run(() => rawPreviewFrom(photo.uri.fsPath, head)));
       return data ? this.finish(photo, data, readExif(head!)?.orientation, 'raw-preview') : undefined;
+    }
+    if (isHeif(photo.name)) {
+      if (photo.size > MAX_SOURCE_BYTES) {
+        return undefined;
+      }
+      const file = await fulls.run(() => fs.promises.readFile(photo.uri.fsPath).catch(() => undefined));
+      // libheif returns the pixels upright already, so no orientation to apply.
+      const t = file && (await makeThumb(file, { px, format: 'heif' }).catch(() => undefined));
+      return t ? this.store_(photo, t, 'heif') : undefined;
     }
     if (!isJpeg(photo.name)) {
       return undefined;
@@ -435,6 +446,19 @@ export class ThumbJob {
 function isJpeg(name: string): boolean {
   const e = extensionOf(name);
   return e === 'jpg' || e === 'jpeg' || e === 'jpe' || e === 'jfif';
+}
+
+/**
+ * A HEIC/HEIF file as WebP bytes the webview can draw, with long edge `px`. Chromium has no HEIF
+ * decoder of its own, so the extension host decodes with libheif and re-encodes.
+ */
+export async function heifPreview(fsPath: string, px = HEIF_PREVIEW_PX): Promise<Uint8Array | undefined> {
+  const file = await fs.promises.readFile(fsPath).catch(() => undefined);
+  if (!file || file.length > MAX_SOURCE_BYTES) {
+    return undefined;
+  }
+  const t = await makeThumb(file, { px, quality: 88, format: 'heif' }).catch(() => undefined);
+  return t?.data;
 }
 
 /** The largest browser-decodable JPEG preview embedded in a RAW file. */

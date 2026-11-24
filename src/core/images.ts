@@ -11,7 +11,10 @@ export const RAW_EXTENSIONS = new Set([
   'srw', 'x3f', 'erf', 'kdc', 'mrw', '3fr', 'iiq', 'rwl',
 ]);
 
-export const OTHER_PHOTO_EXTENSIONS = new Set(['tif', 'tiff', 'heic', 'heif']);
+/** HEIF containers (iPhone photos). Decoded in the extension host with libheif. */
+export const HEIF_EXTENSIONS = new Set(['heic', 'heif', 'heics', 'hif']);
+
+export const OTHER_PHOTO_EXTENSIONS = new Set(['tif', 'tiff', ...HEIF_EXTENSIONS]);
 
 /** TIFF-structured formats whose EXIF we can read with the TIFF parser. */
 export const TIFF_BASED_EXTENSIONS = new Set([
@@ -41,6 +44,11 @@ export function isDisplayable(name: string): boolean {
 
 export function isRaw(name: string): boolean {
   return RAW_EXTENSIONS.has(extensionOf(name));
+}
+
+/** HEIC/HEIF: the browser cannot draw it, but the extension host can decode it (see core/heif). */
+export function isHeif(name: string): boolean {
+  return HEIF_EXTENSIONS.has(extensionOf(name));
 }
 
 /** Folders the tree should not show. */

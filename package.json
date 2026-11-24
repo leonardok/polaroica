@@ -565,6 +565,7 @@
     "@jsquash/jpeg": "1.6.0",
     "@jsquash/webp": "1.5.0",
     "@mediapipe/tasks-vision": "1.2.3",
+    "libheif-js": "1.23.5",
     "libraw-wasm": "1.6.0"
   }
 }

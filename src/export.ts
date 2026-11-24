@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { cpuCores } from './core/codec';
 import { ExportPool } from './core/exporter';
-import { EXPORT_FOLDER, extensionOf, isRaw, nextFreeName } from './core/images';
+import { EXPORT_FOLDER, extensionOf, isHeif, isRaw, nextFreeName } from './core/images';
 import { isDefault } from './core/xmp';
 import { EditStore } from './edits';
 import { Libraries } from './libraries';
@@ -11,10 +11,10 @@ import { mapLimit, PhotoStore } from './photoStore';
 
 const RECENT_TARGETS = 'polaroica.recentExportTargets';
 
-/** Photos that can be exported: JPEGs and RAW files. */
+/** Photos that can be exported: JPEGs, HEICs and RAW files. */
 export function isExportable(name: string): boolean {
   const ext = extensionOf(name);
-  return isRaw(name) || ext === 'jpg' || ext === 'jpeg';
+  return isRaw(name) || isHeif(name) || ext === 'jpg' || ext === 'jpeg';
 }
 
 /** Export to JPEG: pick which photos, how big and where; then render them on worker threads. */

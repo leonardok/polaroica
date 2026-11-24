@@ -7,6 +7,7 @@ import * as path from 'path';
 import { pathToFileURL } from 'url';
 import { Worker } from 'worker_threads';
 import * as os from 'os';
+import { decodeHeif } from './heif';
 import { downscale, orient, Rgba, trimBars } from './image';
 import { Analysis, analyzePixels, focusOfFrame } from './analyze';
 
@@ -78,24 +79,41 @@ export interface MadeThumb {
   sourceHeight: number;
 }
 
+/** What the source bytes are. HEIF is decoded by libheif, everything else by the JPEG codec. */
+export type SourceFormat = 'jpeg' | 'heif';
+
 /**
- * JPEG bytes -> WebP thumbnail with long edge `px`. `orientation` is the photo's EXIF orientation
- * (previews and EXIF thumbnails are stored unrotated, like the main image). `trim` removes
- * letterbox bars (EXIF thumbnails).
+ * JPEG (or HEIF) bytes -> WebP thumbnail with long edge `px`. `orientation` is the photo's EXIF
+ * orientation (previews and EXIF thumbnails are stored unrotated, like the main image). `trim`
+ * removes letterbox bars (EXIF thumbnails).
  */
 export interface ThumbOptions {
   px: number;
   orientation?: number;
   trim?: boolean;
   quality?: number;
+  format?: SourceFormat;
+}
+
+/**
+ * Source bytes -> RGBA, as stored: never rotated here, because callers rotate once after
+ * shrinking. HEIF is the exception — libheif applies the file's own `irot`/`imir`, so those
+ * pixels arrive upright and carry no orientation to apply (see `decodeHeif`).
+ */
+async function decodeSource(bytes: Uint8Array, format: SourceFormat | undefined): Promise<Rgba> {
+  if (format === 'heif') {
+    return decodeHeif(bytes);
+  }
+  const { decode } = await codecs();
+  const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  // preserveOrientation=false: raw pixels as stored; we rotate ourselves after shrinking.
+  return decode.default(ab, { preserveOrientation: false });
 }
 
 /** In this thread. Used by the worker threads, and as a fallback when workers can't start. */
 export async function makeThumbHere(jpeg: Uint8Array, opts: ThumbOptions): Promise<MadeThumb> {
-  const { decode, encode } = await codecs();
-  const ab = jpeg.buffer.slice(jpeg.byteOffset, jpeg.byteOffset + jpeg.byteLength) as ArrayBuffer;
-  // preserveOrientation=false: raw pixels as stored; we rotate ourselves after shrinking.
-  let img = await decode.default(ab, { preserveOrientation: false });
+  const { encode } = await codecs();
+  let img = await decodeSource(jpeg, opts.format);
   const sourceWidth = img.width;
   const sourceHeight = img.height;
   if (opts.trim) {
@@ -113,16 +131,15 @@ export interface AnalyzeOptions {
   /** Also return the photo, upright, at this long edge (for the face model). */
   facePx?: number;
   orientation?: number;
+  format?: SourceFormat;
 }
 
 export type Analyzed = Analysis & { sourceWidth: number; sourceHeight: number; pixels?: Rgba; /** CPU time of the decode + measuring, ms. */ ms?: number };
 
-/** Decodes a JPEG and measures it for Auto-Rank at ~1024 px. In this thread. */
+/** Decodes a photo and measures it for Auto-Rank at ~1024 px. In this thread. */
 export async function analyzeHere(jpeg: Uint8Array, opts: AnalyzeOptions = {}): Promise<Analyzed> {
-  const { decode } = await codecs();
   const t0 = Date.now();
-  const ab = jpeg.buffer.slice(jpeg.byteOffset, jpeg.byteOffset + jpeg.byteLength) as ArrayBuffer;
-  const img = await decode.default(ab, { preserveOrientation: false });
+  const img = await decodeSource(jpeg, opts.format);
   // Shrinking the full decode is the slow part (as slow as decoding), so do it once, to 1600 px
   // upright: focus is measured there (and on faces, by the face model, at the same size); the
   // 1024 px copy for the other measurements is made from it.
@@ -258,7 +275,7 @@ export function busyThreads(): number {
 let pool: Pool | undefined;
 let poolFailed = false;
 
-/** JPEG bytes -> WebP thumbnail, on a worker thread when possible. */
+/** JPEG or HEIF bytes -> WebP thumbnail, on a worker thread when possible. */
 export async function makeThumb(jpeg: Uint8Array, opts: ThumbOptions): Promise<MadeThumb> {
   if (!pool && !poolFailed && fs.existsSync(path.join(__dirname, 'codecWorker.js'))) {
     try {
@@ -282,7 +299,7 @@ export async function makeThumb(jpeg: Uint8Array, opts: ThumbOptions): Promise<M
   return makeThumbHere(jpeg, opts);
 }
 
-/** Auto-Rank measurements of a JPEG, on a worker thread when possible. */
+/** Auto-Rank measurements of a photo, on a worker thread when possible. */
 export async function analyzeJpeg(jpeg: Uint8Array, opts: AnalyzeOptions = {}): Promise<Analyzed> {
   if (!pool && !poolFailed && fs.existsSync(path.join(__dirname, 'codecWorker.js'))) {
     try {

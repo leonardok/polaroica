@@ -4,7 +4,7 @@ import { Analysis } from './core/analyze';
 import { Rgba } from './core/image';
 import { analyzeJpeg, busyThreads } from './core/codec';
 import { captureTime, embeddedPreviews, isBrowserJpeg, mpfPreviews, readExif } from './core/exif';
-import { extensionOf, isRaw } from './core/images';
+import { extensionOf, isHeif, isRaw } from './core/images';
 import { FaceMetric, PeopleSignal, rankAlbum, RankInput, RankOptions } from './core/rank';
 import { faceModels, FaceModels } from './faceModel';
 import { emptySidecar, Sidecar } from './core/xmp';
@@ -395,7 +395,8 @@ export class AutoRanker {
       }
     }
     const ext = extensionOf(p.name);
-    if (isRaw(p.name) || !['jpg', 'jpeg', 'jpe', 'jfif'].includes(ext) || p.size > 80 * 1024 * 1024) {
+    const heif = isHeif(p.name);
+    if (isRaw(p.name) || (!heif && !['jpg', 'jpeg', 'jpe', 'jfif'].includes(ext)) || p.size > 80 * 1024 * 1024) {
       return undefined;
     }
     t = Date.now();
@@ -405,7 +406,8 @@ export class AutoRanker {
       return undefined;
     }
     stats.bytes += full.length - head.length;
-    const a = await analyzeJpeg(full, opts); // hands `full` to a decoding thread (not copied)
+    // HEIC: libheif returns the pixels upright, so there is no orientation left to apply.
+    const a = await analyzeJpeg(full, heif ? { ...opts, orientation: undefined, format: 'heif' } : opts); // hands `full` to a decoding thread (not copied)
     stats.decodeMs += a.ms ?? 0;
     return { sharpness: a.sharpness, blown: a.blown, hash: a.hash, layout: a.layout, frameFocus: a.frameFocus, time, pixels: a.pixels };
   }

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { fromWire, toWire } from '../core/wire';
 import { test } from 'node:test';
 import { cameraLabel, embeddedPreviews, embeddedThumbnail, formatExifDate, formatExposure, isBrowserJpeg, readExif } from '../core/exif';
-import { compareNames, extensionOf, isDisplayable, isHiddenFolder, isPhoto, isRaw, nextFreeName, sortPhotos } from '../core/images';
+import { compareNames, extensionOf, isDisplayable, isHeif, isHiddenFolder, isPhoto, isRaw, nextFreeName, sortPhotos } from '../core/images';
 import { candidateLocalPaths, defaultLibraryName, formatUnc, looksLikeNetworkPath, parseSmbAddress } from '../core/smb';
 
 test('photo file types', () => {
@@ -12,6 +12,8 @@ test('photo file types', () => {
   assert.ok(isPhoto('a.JPG'));
   assert.ok(isPhoto('a.nef'));
   assert.ok(isPhoto('a.heic'));
+  assert.ok(isHeif('a.HEIC') && isHeif('a.heif') && !isHeif('a.jpg') && !isHeif('a.tif'));
+  assert.ok(!isDisplayable('a.heic'), 'a webview cannot draw HEIC itself');
   assert.ok(!isPhoto('a.txt'));
   assert.ok(!isPhoto('._a.jpg'), 'macOS resource fork');
   assert.ok(isDisplayable('a.webp'));

@@ -12,7 +12,8 @@ import { asShotKelvin } from './whiteBalance';
 import { applyEdits, matchToPreview, rgbToRgba } from './develop';
 import { embeddedPreviews, readExif } from './exif';
 import { downscale, orient, Rgba } from './image';
-import { isRaw } from './images';
+import { decodeHeif } from './heif';
+import { isHeif, isRaw } from './images';
 import { assembleJpeg, buildExif } from './jpegFile';
 import { Edits } from './xmp';
 
@@ -29,8 +30,8 @@ export interface ExportResult {
   width: number;
   height: number;
   bytes: number;
-  /** How the image was made: 'jpeg', 'raw' (LibRaw, matched to the camera preview), 'raw-plain'. */
-  source: 'jpeg' | 'raw' | 'raw-plain';
+  /** How the image was made: 'jpeg', 'heif', 'raw' (LibRaw, matched to the camera preview), 'raw-plain'. */
+  source: 'jpeg' | 'heif' | 'raw' | 'raw-plain';
 }
 
 const THUMB_PX = 160;
@@ -172,11 +173,15 @@ export async function renderExport(src: string, opts: ExportOptions): Promise<{ 
     const r = await decodeRaw(file);
     img = r.img;
     source = r.matched ? 'raw' : 'raw-plain';
+  } else if (isHeif(path.basename(src))) {
+    // libheif applies the file's own rotation, so no EXIF orientation to apply here.
+    img = await decodeHeif(file);
+    source = 'heif';
   } else if (file[0] === 0xff && file[1] === 0xd8) {
     img = orient(await decode.default(toArrayBuffer(file), { preserveOrientation: false }), info?.orientation);
     source = 'jpeg';
   } else {
-    throw new Error('only JPEG and RAW photos can be exported');
+    throw new Error('only JPEG, HEIC and RAW photos can be exported');
   }
   if (opts.edits) {
     applyEdits(img, opts.edits);

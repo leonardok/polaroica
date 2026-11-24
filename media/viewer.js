@@ -618,12 +618,13 @@
         }
         break;
       case 'preview':
-        // RAW: the JPEG preview embedded in the file (not needed when drawing with WebGL).
+        // A drawable copy of a photo the browser cannot open itself: the JPEG embedded in a RAW
+        // file, or a WebP decoded from a HEIC (not needed when drawing with WebGL).
         if (current && current.photo.name === m.name && !glWanted()) {
           if (m.data) {
-            showMain(track(blobUrl(m.data, 'image/jpeg')), m.name);
+            showMain(track(blobUrl(m.data, m.mime || 'image/jpeg')), m.name);
           } else {
-            noteEl.textContent = 'This RAW file has no preview we can show.';
+            noteEl.textContent = 'This file has no preview we can show.';
           }
         }
         break;

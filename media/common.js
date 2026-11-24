@@ -172,7 +172,7 @@
   }
 
   /**
-   * Thumbnail or a labelled placeholder for formats a browser can't draw (RAW, TIFF, HEIC).
+   * Thumbnail or a labelled placeholder for formats a browser can't draw (RAW, TIFF).
    * With a loader, the <img> gets its src only when the loader decides (on screen, in turn).
    */
   function picture(photo, cls, loader) {

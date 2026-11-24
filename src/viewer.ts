@@ -5,8 +5,8 @@ import { detailRows, toView } from './details';
 import { Libraries } from './libraries';
 import { Mover } from './move';
 import { Photo, PhotoStore } from './photoStore';
-import { isDisplayable, isRaw } from './core/images';
-import { rawPreview, ThumbService } from './thumbs';
+import { isDisplayable, isHeif, isRaw } from './core/images';
+import { heifPreview, rawPreview, ThumbService } from './thumbs';
 import { DETAILS_WIDTH, localRoots, post, webviewHtml } from './webview';
 import * as fs from 'fs';
 import { EditStore } from './edits';
@@ -224,6 +224,8 @@ class PhotoViewer {
     }
     const view = toView(webview, photo);
     const raw = isRaw(photo.name);
+    // HEIC: Chromium cannot draw the file, so the host sends a WebP copy, as it does for RAW.
+    const heif = isHeif(photo.name);
     const [edits, cullMap, faces] = await Promise.all([
       this.owner.edits.load(photo.uri),
       this.owner.edits.cullingIn(this.folder.fsPath),
@@ -244,8 +246,8 @@ class PhotoViewer {
       photo: view,
       thumb: cached.get(photo.name)?.data,
       thumbQuick: cached.get(photo.name)?.quick,
-      // RAW: the preview JPEG embedded in the file is sent separately once read.
-      waitForPreview: raw,
+      // RAW and HEIC: a drawable copy of the photo is sent separately once made.
+      waitForPreview: raw || heif,
       strip: near.map((p, k) => ({
         index: from + k,
         name: p.name,
@@ -269,7 +271,15 @@ class PhotoViewer {
         }
       }),
     ];
-    if (raw) {
+    if (heif) {
+      work.push(
+        heifPreview(photo.uri.fsPath).then((data) => {
+          if (this.current === photo) {
+            void post(webview, { type: 'preview', name: photo.name, data, mime: 'image/webp' });
+          }
+        }),
+      );
+    } else if (raw) {
       work.push(
         rawPreview(photo.uri.fsPath).then((data) => {
           if (this.current === photo) {
@@ -322,11 +332,22 @@ class PhotoViewer {
         if (!photo || photo.name !== m.name) {
           break;
         }
-        const data = isRaw(photo.name)
-          ? await rawPreview(photo.uri.fsPath)
-          : await fs.promises.readFile(photo.uri.fsPath).catch(() => undefined);
+        // The editor needs bytes a browser can decode: the embedded JPEG for RAW, a WebP copy
+        // for HEIC, the file itself for everything else.
+        let data: Uint8Array | undefined;
+        let mime: string;
+        if (isRaw(photo.name)) {
+          data = await rawPreview(photo.uri.fsPath);
+          mime = 'image/jpeg';
+        } else if (isHeif(photo.name)) {
+          data = await heifPreview(photo.uri.fsPath);
+          mime = 'image/webp';
+        } else {
+          data = await fs.promises.readFile(photo.uri.fsPath).catch(() => undefined);
+          mime = mimeOf(photo.name);
+        }
         if (this.current === photo) {
-          void post(this.panel.webview, { type: 'bytes', name: photo.name, data, mime: isRaw(photo.name) ? 'image/jpeg' : mimeOf(photo.name) });
+          void post(this.panel.webview, { type: 'bytes', name: photo.name, data, mime });
         }
         break;
       }

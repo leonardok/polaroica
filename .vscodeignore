@@ -13,3 +13,9 @@ node_modules/@mediapipe/tasks-vision/vision_bundle.cjs
 node_modules/@mediapipe/tasks-vision/vision_bundle.mjs
 node_modules/libraw-wasm/dist/index.js
 node_modules/libraw-wasm/dist/worker.js
+node_modules/libheif-js/index.js
+node_modules/libheif-js/wasm.js
+node_modules/libheif-js/wasm-bundle.js
+node_modules/libheif-js/libheif/**
+node_modules/libheif-js/libheif-wasm/libheif-bundle.js
+node_modules/libheif-js/libheif-wasm/libheif-bundle.mjs

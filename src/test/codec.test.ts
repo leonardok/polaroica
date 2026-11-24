@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { test } from 'node:test';
 import { pathToFileURL } from 'node:url';
+import * as zlib from 'node:zlib';
 import { makeThumb } from '../core/codec';
+import { decodeHeif } from '../core/heif';
 import { embeddedThumbnail, jpegSegments, mpfPreviews, readExif } from '../core/exif';
 import { downscale, orient, trimBars } from '../core/image';
 
@@ -135,4 +139,76 @@ test('MPF index behind a large XMP segment: found once enough of the header is r
   const long = file.subarray(0, 512 * 1024);
   assert.deepEqual(mpfPreviews(long)[0], { offset: previewStart, length: preview.length });
   assert.equal(jpegSegments(long).complete, true);
+});
+
+// ---- HEIC/HEIF --------------------------------------------------------------------------
+
+/**
+ * A HEIC file to decode. libheif only reads, so the fixture is made with macOS `sips`; where that
+ * is missing (Linux, Windows) the HEIC tests are skipped.
+ */
+function heicFixture(): string | undefined {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'polaroica-heic-'));
+  const png = path.join(dir, 'in.png');
+  const heic = path.join(dir, 'in.heic');
+  // 240×120, red rising to the right, green rising downwards: proves the pixels line up.
+  const w = 240;
+  const h = 120;
+  const rows: Buffer[] = [];
+  for (let y = 0; y < h; y++) {
+    const row = Buffer.alloc(1 + w * 3);
+    for (let x = 0; x < w; x++) {
+      row[1 + x * 3] = Math.floor((x * 255) / w);
+      row[2 + x * 3] = Math.floor((y * 255) / h);
+      row[3 + x * 3] = 120;
+    }
+    rows.push(row);
+  }
+  const chunk = (type: string, body: Buffer) => {
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(body.length);
+    const tagged = Buffer.concat([Buffer.from(type, 'latin1'), body]);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(zlib.crc32(tagged) >>> 0);
+    return Buffer.concat([len, tagged, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0);
+  ihdr.writeUInt32BE(h, 4);
+  ihdr[8] = 8; // 8 bits per channel
+  ihdr[9] = 2; // truecolour
+  fs.writeFileSync(
+    png,
+    Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      chunk('IHDR', ihdr),
+      chunk('IDAT', zlib.deflateSync(Buffer.concat(rows))),
+      chunk('IEND', Buffer.alloc(0)),
+    ]),
+  );
+  const r = spawnSync('sips', ['-s', 'format', 'heic', png, '--out', heic], { stdio: 'ignore' });
+  return r.status === 0 && fs.existsSync(heic) ? heic : undefined;
+}
+
+const heic = process.platform === 'darwin' ? heicFixture() : undefined;
+const noHeic = { skip: heic ? false : 'needs macOS `sips` to make a HEIC fixture' };
+
+test('HEIC: decoded by libheif, with the pixels in place', noHeic, async () => {
+  const img = await decodeHeif(fs.readFileSync(heic!));
+  assert.deepEqual([img.width, img.height], [240, 120]);
+  const at = (x: number, y: number) => [0, 1, 2].map((c) => img.data[(y * img.width + x) * 4 + c]);
+  // Red rises left to right, green top to bottom, blue is flat (loosely: HEVC is lossy and
+  // subsamples chroma, so a channel lands within a few steps of where it started).
+  const near = (got: number[], want: number[]) => got.every((v, i) => Math.abs(v - want[i]) <= 10);
+  assert.ok(near(at(2, 2), [0, 0, 120]), `top left was ${at(2, 2)}`);
+  assert.ok(near(at(237, 2), [251, 0, 120]), `top right was ${at(237, 2)}`);
+  assert.ok(near(at(2, 117), [0, 249, 120]), `bottom left was ${at(2, 117)}`);
+});
+
+test('HEIC: thumbnail comes back as WebP at the asked-for size', noHeic, async () => {
+  const t = await makeThumb(fs.readFileSync(heic!), { px: 64, format: 'heif' });
+  assert.deepEqual([t.sourceWidth, t.sourceHeight], [240, 120]);
+  assert.deepEqual([t.w, t.h], [64, 32]);
+  assert.equal(t.data.toString('latin1', 0, 4), 'RIFF');
+  assert.equal(t.data.toString('latin1', 8, 12), 'WEBP');
 });
