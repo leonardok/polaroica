@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { Coalescer } from './core/coalesce';
 import { CacheManager, Listing, ListedPhoto } from './core/cache';
 import { ExifInfo, readExif } from './core/exif';
 import { compareNames, isHiddenFolder, isPhoto, PhotoEntry, sortPhotos, SortKey } from './core/images';
@@ -45,8 +46,30 @@ export class PhotoStore implements vscode.Disposable {
   private readonly changed = new vscode.EventEmitter<vscode.Uri | undefined>();
   /** Fires with a folder whose contents changed, or `undefined` for "everything". */
   readonly onDidChange = this.changed.event;
+  /**
+   * A burst of file events becomes one refresh. Deleting a photo makes the watcher report the
+   * photo and its sidecar, and each report would otherwise relist the folder and redraw every
+   * open grid, which on a share costs far more than the delete itself.
+   */
+  private readonly coalescer = new Coalescer<string>((folders, all) => {
+    if (all) {
+      this.changed.fire(undefined);
+      return;
+    }
+    for (const f of folders) {
+      this.changed.fire(vscode.Uri.file(f));
+    }
+  });
 
   constructor(readonly cache: CacheManager) {}
+
+  /**
+   * Holds refreshes while a bulk change runs: the folders it touched are refreshed once, when the
+   * returned function is called, instead of once per file.
+   */
+  holdChanges(): () => void {
+    return this.coalescer.hold();
+  }
 
   listing(folder: vscode.Uri): Promise<FolderListing> {
     const key = folder.fsPath;
@@ -95,6 +118,30 @@ export class PhotoStore implements vscode.Disposable {
     await this.revalidate(folder, true);
   }
 
+  /**
+   * Photos we just deleted ourselves: take them out of the index without relisting the folder.
+   * A relist of a folder of thousands over a share costs seconds, and we already know what went.
+   */
+  async forgetPhotos(folder: vscode.Uri, names: ReadonlySet<string>): Promise<void> {
+    if (!names.size) {
+      return;
+    }
+    const key = folder.fsPath;
+    const fc = await this.cache.folder(key);
+    const listing = fc.listing;
+    if (listing) {
+      fc.setListing({ ...listing, photos: listing.photos.filter((p) => !names.has(p.name)) });
+      this.listings.set(key, Promise.resolve(toFolderListing(folder, fc.listing ?? listing, false)));
+    } else {
+      this.listings.delete(key);
+      this.stale.add(key);
+    }
+    // The next background revalidate will confirm it against the disk.
+    this.revalidated.delete(key);
+    this.revalidated.delete(key + '#deep');
+    this.coalescer.add(key);
+  }
+
   /** Drop what we know about a folder (or everything) and re-read from disk. */
   invalidate(folder?: vscode.Uri): void {
     if (folder) {
@@ -107,7 +154,7 @@ export class PhotoStore implements vscode.Disposable {
       this.listings.clear();
       this.revalidated.clear();
     }
-    this.changed.fire(folder);
+    this.coalescer.add(folder?.fsPath);
   }
 
   private async load(folder: vscode.Uri): Promise<FolderListing> {
@@ -143,10 +190,11 @@ export class PhotoStore implements vscode.Disposable {
     }
     fc.setListing(fresh);
     this.listings.set(folder.fsPath, Promise.resolve(toFolderListing(folder, fresh, false)));
-    this.changed.fire(folder);
+    this.coalescer.add(folder.fsPath);
   }
 
   dispose(): void {
+    this.coalescer.dispose();
     this.changed.dispose();
     void this.cache.flushAll();
   }
@@ -163,9 +211,16 @@ function toFolderListing(folder: vscode.Uri, l: Listing, cached: boolean): Folde
 /** Lists a folder. With `known`, files whose name is already known keep their old stat. */
 async function scan(dir: string, known: Listing | undefined): Promise<Listing> {
   const entries = await fs.promises.readdir(dir, { withFileTypes: true });
+  // A name can come back more than once: SMB shares sometimes repeat entries across the pages of
+  // one enumeration. Keeping both would double-count the photo and give two tiles the same key.
+  const seen = new Set<string>();
   const folders: string[] = [];
   const photoNames: string[] = [];
   for (const e of entries) {
+    if (seen.has(e.name)) {
+      continue;
+    }
+    seen.add(e.name);
     if (e.isDirectory()) {
       if (!isHiddenFolder(e.name)) {
         folders.push(e.name);

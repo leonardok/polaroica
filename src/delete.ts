@@ -73,11 +73,18 @@ export class Deleter {
     }
 
     let out = { trashed: 0, removed: 0, failed: [] as string[] };
+    const gone = new Set<string>();
+    // One refresh at the end: every delete makes the watcher report the photo and its sidecar,
+    // and refreshing per report costs more than the deleting does.
+    const resume = this.store.holdChanges();
     await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: `Deleting ${what}`, cancellable: true },
       async (progress, token) => {
         out = await runDeletes(plan.items, {
-          delete: (item, useTrash) => deleteOne(item, useTrash),
+          delete: async (item, useTrash) => {
+            await deleteOne(item, useTrash);
+            gone.add(item.name);
+          },
           isGone: (err) => err instanceof vscode.FileSystemError && err.code === 'FileNotFound',
           progress: (done, item) => progress.report({ message: `${done} of ${n} · ${item.name}`, increment: 100 / n }),
           cancelled: () => token.isCancellationRequested,
@@ -97,10 +104,17 @@ export class Deleter {
     );
     const { trashed, removed, failed } = out;
 
-    for (const folder of folders) {
-      await fs.promises.rmdir(path.join(folder.fsPath, SIDECAR_DIR)).catch(() => undefined); // only when empty
-      this.edits.forget(folder.fsPath);
-      this.store.invalidate(folder);
+    try {
+      for (const folder of folders) {
+        await fs.promises.rmdir(path.join(folder.fsPath, SIDECAR_DIR)).catch(() => undefined); // only when empty
+        this.edits.forget(folder.fsPath);
+        const here = new Set(
+          plan.items.filter((i) => path.dirname(i.photo) === folder.fsPath && gone.has(i.name)).map((i) => i.name),
+        );
+        await this.store.forgetPhotos(folder, here);
+      }
+    } finally {
+      resume();
     }
 
     const parts: string[] = [];
