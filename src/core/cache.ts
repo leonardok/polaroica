@@ -67,6 +67,19 @@ export interface Thumb {
 /** `px` value stored for quick thumbnails. */
 export const QUICK_PX = 0;
 
+/**
+ * Every thumbnail we store is WebP (RIFF....WEBP). A cached entry that isn't one is pointing at
+ * the wrong bytes — the pack and the index drifted apart — and the photo it belongs to would show
+ * as a broken image for as long as its size and mtime keep the entry looking fresh.
+ */
+function looksLikeWebp(b: Buffer): boolean {
+  return (
+    b.length >= 12 &&
+    b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 &&
+    b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50
+  );
+}
+
 export class FolderCache {
   private data: IndexData;
   private saveTimer?: NodeJS.Timeout;
@@ -218,8 +231,10 @@ export class FolderCache {
           }
           const buf = Buffer.alloc(e.len);
           const { bytesRead } = await fh.read(buf, 0, e.len, e.off);
-          if (bytesRead === e.len) {
+          if (bytesRead === e.len && looksLikeWebp(buf)) {
             out.set(i.name, { data: buf, w: e.w, h: e.h, quick: e.px === QUICK_PX });
+          } else {
+            this.drop(i.name);
           }
         }
       } finally {
@@ -230,6 +245,17 @@ export class FolderCache {
       this.touch();
     }
     return out;
+  }
+
+  /** Forgets a thumbnail (it is unreadable, or no longer what it claims to be). */
+  private drop(name: string): void {
+    const e = this.data.thumbs[name];
+    if (!e) {
+      return;
+    }
+    this.data.garbage += e.len;
+    delete this.data.thumbs[name];
+    this.touch();
   }
 
   async putThumb(name: string, size: number, mtime: number, px: number, t: Thumb): Promise<void> {
@@ -273,9 +299,15 @@ export class FolderCache {
       const parts: Buffer[] = [];
       let off = 0;
       try {
-        for (const e of Object.values(this.data.thumbs)) {
+        for (const [name, e] of Object.entries(this.data.thumbs)) {
           const buf = Buffer.alloc(e.len);
-          await fh.read(buf, 0, e.len, e.off);
+          const { bytesRead } = await fh.read(buf, 0, e.len, e.off);
+          if (bytesRead !== e.len || !looksLikeWebp(buf)) {
+            // Keeping it would write a block of zeros into the new pack and point the entry at
+            // it, which looks fresh for ever. Let the thumbnail be made again instead.
+            delete this.data.thumbs[name];
+            continue;
+          }
           parts.push(buf);
           e.off = off;
           off += e.len;
