@@ -16,6 +16,12 @@ export class Deleter {
     private readonly edits: EditStore,
   ) {}
 
+  /**
+   * The photos that just left the disk, by full path. The tag index listens: without it a tag
+   * keeps counting photos that are gone until a grid reload or the next startup prune notices.
+   */
+  onDeleted?: (paths: readonly string[]) => void;
+
   async deleteRejected(folder: vscode.Uri): Promise<void> {
     const where = this.libraries.crumbs(folder).join(' / ');
     const [photos, culling] = await Promise.all([this.store.photos(folder), this.edits.cullingIn(folder.fsPath)]);
@@ -106,6 +112,7 @@ export class Deleter {
 
     let out = { trashed: 0, removed: 0, failed: [] as string[] };
     const gone = new Set<string>();
+    const deleted: string[] = [];
     // One refresh at the end: every delete makes the watcher report the photo and its sidecar,
     // and refreshing per report costs more than the deleting does.
     const resume = this.store.holdChanges();
@@ -116,6 +123,7 @@ export class Deleter {
           delete: async (item, useTrash) => {
             await deleteOne(item, useTrash);
             gone.add(item.name);
+            deleted.push(item.photo);
           },
           isGone: (err) => err instanceof vscode.FileSystemError && err.code === 'FileNotFound',
           progress: (done, item) => progress.report({ message: `${done} of ${n} · ${item.name}`, increment: 100 / n }),
@@ -147,6 +155,9 @@ export class Deleter {
       }
     } finally {
       resume();
+    }
+    if (deleted.length) {
+      this.onDeleted?.(deleted);
     }
 
     const parts: string[] = [];

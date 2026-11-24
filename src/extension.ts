@@ -133,6 +133,17 @@ export function activate(context: vscode.ExtensionContext): void {
     () => undefined,
   );
 
+  // A photo deleted here is gone for good: drop its record now, so a tag's count falls with the
+  // delete rather than when a grid reload or the next startup prune happens to notice.
+  deleter.onDeleted = (paths) => {
+    void (async () => {
+      for (const p of paths) {
+        await tagIndex.forget(p);
+      }
+      grids.reloadTagGrids();
+    })();
+  };
+
   mover.onDidMove((r) => {
     for (const m of r.moved) {
       grids.closeFor(m.from);
