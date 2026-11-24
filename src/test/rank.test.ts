@@ -198,3 +198,41 @@ test('focus: measured on the subject, not the whole frame', () => {
   // No faces: the frame.
   assert.equal(subjectFocus({ ...base, faces: [] }), 40);
 });
+
+test('a virtual album: photos of the same name in different folders stay apart', () => {
+  const base = { sharpness: 50, blown: 1, hash: '0'.repeat(16), layout: '0'.repeat(16), frameFocus: 50 };
+  const inputs = [
+    { ...base, name: 'DSC001.jpg', id: '/photos/natal/DSC001.jpg', time: 1000 },
+    { ...base, name: 'DSC001.jpg', id: '/photos/porto/DSC001.jpg', time: 9_000_000 },
+  ];
+  const out = rankAlbum(inputs, { focus: true, exposure: false, similar: true, reject: false, burstSeconds: 2, sceneSeconds: 60 });
+  assert.equal(out.length, 2, 'both are ranked, not collapsed into one');
+  assert.deepEqual(out.map((r) => r.id).sort(), ['/photos/natal/DSC001.jpg', '/photos/porto/DSC001.jpg']);
+});
+
+test('without capture times, adjacent file numbers only mean a burst inside one folder', () => {
+  const base = { sharpness: 50, blown: 1, hash: '0'.repeat(16), layout: '0'.repeat(16), frameFocus: 50 };
+  const sameFolder = groupSimilar(
+    [
+      { ...base, name: '_A7328.jpg', id: '/photos/natal/_A7328.jpg' },
+      { ...base, name: '_A7329.jpg', id: '/photos/natal/_A7329.jpg' },
+    ],
+    2,
+  );
+  assert.deepEqual(sameFolder.map((g) => g.length), [2], 'one burst');
+
+  const across = groupSimilar(
+    [
+      { ...base, name: '_A7328.jpg', id: '/photos/natal/_A7328.jpg' },
+      { ...base, name: '_A7329.jpg', id: '/photos/porto/_A7329.jpg' },
+    ],
+    2,
+  );
+  assert.deepEqual(across.map((g) => g.length), [1, 1], 'two different shoots, not a burst');
+});
+
+test('with no ids at all (one folder) the grouping is unchanged', () => {
+  const base = { sharpness: 50, blown: 1, hash: '0'.repeat(16), layout: '0'.repeat(16), frameFocus: 50 };
+  const groups = groupSimilar([{ ...base, name: '_A7328.jpg' }, { ...base, name: '_A7329.jpg' }], 2);
+  assert.deepEqual(groups.map((g) => g.length), [2]);
+});

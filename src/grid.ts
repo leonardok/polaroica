@@ -13,6 +13,7 @@ import { PhotoExporter } from './export';
 import { DETAILS_WIDTH, fromWire, localRoots, post, webviewHtml } from './webview';
 import * as fs from 'fs';
 import { FaceModels } from './faceModel';
+import { RankTarget } from './autorank';
 import { FaceMetric } from './core/rank';
 import { Rgba } from './core/image';
 
@@ -38,9 +39,10 @@ type FromGrid =
 
 export interface GridHost {
   openPhoto(folder: vscode.Uri, name: string, sort: SortKey): void;
-  autoRank?(folder: vscode.Uri): void;
-  undoAutoRank?(folder: vscode.Uri): void;
-  makeBest?(folder: vscode.Uri, name: string): void;
+  /** Auto-Rank works on the album's photos, wherever they live. */
+  autoRank?(album: RankTarget): void;
+  undoAutoRank?(key: string): void;
+  makeBest?(photo: vscode.Uri, album: vscode.Uri[]): void;
   deleteRejected?(folder: vscode.Uri): void;
   /** A tag album spans folders: its rejects are picked out of the album's own photos. */
   deleteRejectedAmong?(photos: vscode.Uri[], where: string): void;
@@ -190,12 +192,13 @@ export class GridPanels implements vscode.Disposable {
   }
 
   /** Face metrics for a photo, via the grid tab of its folder (opened if needed). */
-  async detectFaces(folder: vscode.Uri, pixels: Rgba, models: FaceModels): Promise<{ faces?: FaceMetric[]; error?: string }> {
-    const id = FolderSource.idFor(folder);
-    if (!this.panels.get(id)) {
-      this.open(folder);
+  async detectFaces(target: RankTarget, pixels: Rgba, models: FaceModels): Promise<{ faces?: FaceMetric[]; error?: string }> {
+    // The album's own tab runs the model. A run started from the sidebar has no tab open yet, and
+    // only a folder album can be opened from a path.
+    if (!this.panels.get(target.key) && target.folder) {
+      this.open(target.folder);
     }
-    const grid = this.panels.get(id);
+    const grid = this.panels.get(target.key);
     return grid ? grid.detectFaces(pixels, models) : { error: 'the grid tab could not be opened' };
   }
 
@@ -341,6 +344,16 @@ class GridPanel {
   }
 
   /** True when a change to `folder` could change what this grid shows. */
+  /** This grid as an album Auto-Rank can work on: its photos, from however many folders. */
+  rankTarget(): RankTarget {
+    return {
+      key: this.source.id,
+      title: this.source.title,
+      photos: this.photos.map((p) => p.photo),
+      folder: this.source.folder,
+    };
+  }
+
   /** Delete Rejects for this grid: its folder's rejects, or a tag album's own rejected photos. */
   deleteRejected(): void {
     const { host } = this.owner.ctx;
@@ -572,10 +585,10 @@ class GridPanel {
       }
       // Album-wide actions need a real folder; the webview hides them in a tag album.
       case 'autoRank':
-        if (own) host?.autoRank?.(own);
+        host?.autoRank?.(this.rankTarget());
         break;
       case 'undoAutoRank':
-        if (own) host?.undoAutoRank?.(own);
+        host?.undoAutoRank?.(this.source.id);
         break;
       case 'deleteRejected':
         this.deleteRejected();
@@ -589,9 +602,11 @@ class GridPanel {
         r?.(m.error ? { error: m.error } : { faces: m.faces ?? [] });
         break;
       }
-      case 'makeBest':
-        if (own) host?.makeBest?.(own, m.name);
+      case 'makeBest': {
+        const photo = uriOf(m.name);
+        if (photo) host?.makeBest?.(photo, this.photos.map((p) => p.photo.uri));
         break;
+      }
       case 'tileSize':
         await context.globalState.update('polaroica.tileSize', m.size);
         break;

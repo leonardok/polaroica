@@ -16,7 +16,7 @@ import { AutoRanker } from './autorank';
 import { FolderNode, LibraryNode, LibraryTree, TagNode, TreeNode } from './tree';
 import { TagIndex } from './tagIndex';
 import { applyTags, describeResult, TagScanner } from './tags';
-import { TagSource } from './photoSource';
+import { FolderSource, TagSource } from './photoSource';
 import { PhotoViewers } from './viewer';
 
 /** Settings keys that were called `vsphoto.*` before the project was renamed to Polaroica. */
@@ -82,14 +82,14 @@ export function activate(context: vscode.ExtensionContext): void {
     context,
     store,
     edits,
-    (folder, pixels, model) => grids.detectFaces(folder, pixels, model),
+    (album, pixels, model) => grids.detectFaces(album, pixels, model),
     (line) => output.appendLine(`[${new Date().toLocaleTimeString()}] ${line}`),
   );
   grids.setHost({
     openPhoto: (folder, name, sort) => viewers.open(folder, name, sort),
-    autoRank: (folder) => void ranker.run(folder),
-    undoAutoRank: (folder) => void ranker.undoRun(folder),
-    makeBest: (folder, name) => void ranker.makeBest(folder, name),
+    autoRank: (album) => void ranker.run(album),
+    undoAutoRank: (key) => void ranker.undoRun(key),
+    makeBest: (photo, album) => void ranker.makeBest(photo, album),
     deleteRejected: (folder) => void deleter.deleteRejected(folder),
     deleteRejectedAmong: (photos, where) => void deleter.deleteRejectedAmong(photos, where),
     exportPhotos: (folder, selected) => void exporter.exportFrom(folder, selected),
@@ -223,7 +223,12 @@ export function activate(context: vscode.ExtensionContext): void {
       const uri = uriOf(arg);
       if (uri) {
         grids.open(uri);
-        await ranker.run(uri);
+        await ranker.run({
+          key: FolderSource.idFor(uri),
+          title: path.basename(uri.fsPath),
+          photos: await store.photos(uri),
+          folder: uri,
+        });
       } else {
         void vscode.window.showInformationMessage('Right-click an album in the Polaroica sidebar, or use the Auto-Rank button in a grid.');
       }
@@ -256,24 +261,25 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand('polaroica.showLog', () => output.show()),
     vscode.commands.registerCommand('polaroica.undoAutoRank', async (arg?: unknown) => {
-      let uri = uriOf(arg);
-      if (!uri) {
+      const uri = uriOf(arg);
+      let key = uri ? FolderSource.idFor(uri) : undefined;
+      if (!key) {
         const albums = ranker.undoable();
         if (!albums.length) {
           void vscode.window.showInformationMessage('Nothing to undo: no album was auto-ranked in this window.');
           return;
         }
         if (albums.length === 1) {
-          uri = albums[0];
+          key = albums[0].key;
         } else {
           const pick = await vscode.window.showQuickPick(
-            albums.map((a) => ({ label: path.basename(a.fsPath), description: path.dirname(a.fsPath), uri: a })),
+            albums.map((a) => ({ label: a.title, key: a.key })),
             { title: 'Undo Auto-Rank', placeHolder: 'Which album? (most recent first)' },
           );
-          uri = pick?.uri;
+          key = pick?.key;
         }
       }
-      if (uri) await ranker.undoRun(uri);
+      if (key) await ranker.undoRun(key);
     }),
     vscode.commands.registerCommand('polaroica.buildThumbnails', () => background.buildAll()),
     vscode.commands.registerCommand('polaroica.buildThumbnailsHere', async (arg?: unknown) => {

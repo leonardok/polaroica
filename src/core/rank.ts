@@ -21,6 +21,11 @@ export interface FaceMetric {
 
 export interface RankInput extends Analysis {
   name: string;
+  /**
+   * Identifies the photo when a name is not enough: a virtual album spans folders, where two
+   * photos can share a name. The file's path. Defaults to `name` (one folder).
+   */
+  id?: string;
   /** Capture time in ms (EXIF), when known. */
   time?: number;
   /** Faces found ([] = none); undefined when the face model wasn't used. */
@@ -87,6 +92,8 @@ export function subjectFocus(p: RankInput): number | undefined {
 
 export interface RankResult {
   name: string;
+  /** The `id` of the input this is for (its `name` when it had none). */
+  id: string;
   stars: number;
   flag?: 'pick' | 'reject';
   scores: Record<string, number>;
@@ -125,12 +132,24 @@ function alike(a: RankInput, b: RankInput, burst: boolean): boolean {
  * again a few seconds later) the colour layout must match as well, so a reframe or zoom starts a
  * new group.
  */
+const idOf = (p: RankInput): string => p.id ?? p.name;
+
+/** The folder an input's id points into, or undefined when it has no id (a single-folder run). */
+function parentOf(p: RankInput): string | undefined {
+  if (!p.id) {
+    return undefined;
+  }
+  const i = Math.max(p.id.lastIndexOf('/'), p.id.lastIndexOf('\\'));
+  return i >= 0 ? p.id.slice(0, i) : '';
+}
+
 export function groupSimilar(items: RankInput[], burstSeconds: number, sceneSeconds = 60): RankInput[][] {
   const sorted = [...items].sort((a, b) => {
     if (a.time !== undefined && b.time !== undefined && a.time !== b.time) {
       return a.time - b.time;
     }
-    return compareNames(a.name, b.name);
+    const byName = compareNames(a.name, b.name);
+    return byName !== 0 ? byName : compareNames(idOf(a), idOf(b));
   });
   const groups: RankInput[][] = [];
   let cur: RankInput[] = [];
@@ -140,8 +159,11 @@ export function groupSimilar(items: RankInput[], burstSeconds: number, sceneSeco
     if (prev) {
       const timed = prev.time !== undefined && p.time !== undefined;
       const gap = timed ? Math.abs(p.time! - prev.time!) : undefined;
-      const burst = timed ? gap! <= burstSeconds * 1000 : neighbourNumbers(prev.name, p.name, 2);
-      const scene = timed ? gap! <= Math.max(sceneSeconds, burstSeconds) * 1000 : neighbourNumbers(prev.name, p.name, 6);
+      // Without capture times the file numbering is the only hint, and it only means anything
+      // within one folder: _A7329 in two different shoots is not a burst.
+      const near = parentOf(prev) === parentOf(p);
+      const burst = timed ? gap! <= burstSeconds * 1000 : near && neighbourNumbers(prev.name, p.name, 2);
+      const scene = timed ? gap! <= Math.max(sceneSeconds, burstSeconds) * 1000 : near && neighbourNumbers(prev.name, p.name, 6);
       fits = (burst || scene) && cur.some((q) => alike(q, p, burst));
     }
     if (fits) {
@@ -188,11 +210,11 @@ export function rankAlbum(items: RankInput[], opts: RankOptions): RankResult[] {
     if (opts.exposure) s.exposure = exposure(p);
     const ps = peopleScores(p.faces, signals);
     if (ps) Object.assign(s, ps);
-    faceCount.set(p.name, (p.faces ?? []).filter((f) => f.area >= MIN_FACE_AREA).length);
-    base.set(p.name, s);
+    faceCount.set(idOf(p), (p.faces ?? []).filter((f) => f.area >= MIN_FACE_AREA).length);
+    base.set(idOf(p), s);
   }
-  const quality = (name: string) => {
-    const s = base.get(name)!;
+  const quality = (p: RankInput) => {
+    const s = base.get(idOf(p))!;
     const w = { focus: 0.35, exposure: 0.2, eyes: 0.25, looking: 0.1, smile: 0.1, natural: 0.1 };
     let sum = 0;
     let wt = 0;
@@ -212,46 +234,46 @@ export function rankAlbum(items: RankInput[], opts: RankOptions): RankResult[] {
     gid++;
     // In a burst where faces were found in some frames, a frame without a detectable face (turned
     // away, motion blur) shouldn't win on focus alone: give it a below-average people score.
-    if (signals.length && g.some((p) => faceCount.get(p.name))) {
+    if (signals.length && g.some((p) => faceCount.get(idOf(p)))) {
       for (const p of g) {
-        if (!faceCount.get(p.name)) {
-          const s = base.get(p.name)!;
+        if (!faceCount.get(idOf(p))) {
+          const s = base.get(idOf(p))!;
           for (const k of signals) s[k] = 35;
         }
       }
     }
-    const ranked = [...g].sort((a, b) => quality(b.name) - quality(a.name));
+    const ranked = [...g].sort((a, b) => quality(b) - quality(a));
     // The best shot you haven't rejected (if you rejected them all, none is picked).
     const best: RankInput | undefined = ranked.find((p) => !p.rejected);
     const top = best ?? ranked[0];
-    const bestQ = quality(top.name);
+    const bestQ = quality(top);
     const bestStars = starsFor(bestQ);
     const avg: Record<string, number> = {};
     if (g.length > 1) {
-      for (const k of Object.keys(base.get(top.name)!)) {
-        avg[k] = Math.round(g.reduce((a, p) => a + base.get(p.name)![k], 0) / g.length);
+      for (const k of Object.keys(base.get(idOf(top))!)) {
+        avg[k] = Math.round(g.reduce((a, p) => a + base.get(idOf(p))![k], 0) / g.length);
       }
-      if (opts.similar) avg.similar = Math.round(g.reduce((a, p) => a + (100 * quality(p.name)) / (bestQ || 1), 0) / g.length);
+      if (opts.similar) avg.similar = Math.round(g.reduce((a, p) => a + (100 * quality(p)) / (bestQ || 1), 0) / g.length);
     }
     const notesFor = (p: RankInput) => {
-      const s = base.get(p.name)!;
+      const s = base.get(idOf(p))!;
       const notes: string[] = [];
       if (opts.focus && Math.round(s.focus ?? 100) < 20) notes.push('blurry');
       if (opts.exposure && Math.round(s.exposure ?? 100) < 60) notes.push('washed out');
-      if (faceCount.get(p.name) && s.eyes !== undefined && Math.round(s.eyes) < 40) notes.push('eyes closed');
+      if (faceCount.get(idOf(p)) && s.eyes !== undefined && Math.round(s.eyes) < 40) notes.push('eyes closed');
       return notes;
     };
     // Near-ties of the best are kept too (no reject, full stars), best first, up to MAX_KEEP in all.
     const kept = new Set(
       best
         ? ranked
-            .filter((p) => p !== best && !p.rejected && quality(p.name) >= TIE_BAND * bestQ && !notesFor(p).length)
+            .filter((p) => p !== best && !p.rejected && quality(p) >= TIE_BAND * bestQ && !notesFor(p).length)
             .slice(0, MAX_KEEP - 1)
         : [],
     );
     for (const p of g) {
-      const q = quality(p.name);
-      const scores = { ...base.get(p.name)! };
+      const q = quality(p);
+      const scores = { ...base.get(idOf(p))! };
       if (opts.similar) scores.similar = g.length > 1 ? clamp((100 * q) / (bestQ || 1)) : 100;
       for (const k of Object.keys(scores)) scores[k] = Math.round(scores[k]);
       const isBest = p === best;
@@ -266,13 +288,14 @@ export function rankAlbum(items: RankInput[], opts: RankOptions): RankResult[] {
       if (opts.reject && (notes.length || (g.length > 1 && !isBest && !isKept))) flag = 'reject';
       out.push({
         name: p.name,
+        id: idOf(p),
         stars,
         flag,
         scores,
         groupAvg: g.length > 1 ? avg : undefined,
         group: g.length > 1 ? { id: `g${gid}`, size: g.length, best: isBest, ...(isKept ? { kept: true } : {}) } : undefined,
         notes,
-        reason: reasonFor(scores, notes, g.length, isBest, faceCount.get(p.name) ?? 0, isKept),
+        reason: reasonFor(scores, notes, g.length, isBest, faceCount.get(idOf(p)) ?? 0, isKept),
       });
     }
   }

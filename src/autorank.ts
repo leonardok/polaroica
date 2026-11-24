@@ -42,8 +42,20 @@ type Choice = 'focus' | 'exposure' | 'similar' | 'people' | PeopleSignal | 'keep
 /** Long edge of the image the face model gets (upright RGBA, made from the same decode). */
 const FACE_PX = 1600;
 
-/** Measures faces in a photo (upright RGBA pixels). */
-export type FaceDetector = (folder: vscode.Uri, pixels: Rgba, models: FaceModels) => Promise<{ faces?: FaceMetric[]; error?: string }>;
+/**
+ * What a run works on: one folder's photos, or a virtual album's, which come from any number of
+ * folders. `key` identifies the album (the grid tab's id) so a run can be undone; `folder` is set
+ * only when the album *is* a folder, for opening its grid when the face model needs a page.
+ */
+export interface RankTarget {
+  readonly key: string;
+  readonly title: string;
+  readonly photos: ReadonlyArray<Photo>;
+  readonly folder?: vscode.Uri;
+}
+
+/** Measures faces in a photo (upright RGBA pixels), in the album's own grid tab. */
+export type FaceDetector = (target: RankTarget, pixels: Rgba, models: FaceModels) => Promise<{ faces?: FaceMetric[]; error?: string }>;
 
 /**
  * Auto-Rank an album: measure each photo (focus, blown highlights, a look-alike hash, capture
@@ -63,7 +75,7 @@ export async function storedFaceBoxes(store: PhotoStore, photo: Photo): Promise<
 }
 
 export class AutoRanker {
-  private readonly undo = new Map<string, Array<{ photo: vscode.Uri; before: Sidecar }>>();
+  private readonly undo = new Map<string, { title: string; items: Array<{ photo: vscode.Uri; before: Sidecar }> }>();
   /** Albums with a run that can be undone, most recent last. */
   private readonly undoOrder: string[] = [];
 
@@ -75,13 +87,13 @@ export class AutoRanker {
     private readonly log: (line: string) => void = () => undefined,
   ) {}
 
-  async run(folder: vscode.Uri): Promise<void> {
-    const photos = await this.store.photos(folder);
+  async run(target: RankTarget): Promise<void> {
+    const photos = [...target.photos];
     if (!photos.length) {
-      void vscode.window.showInformationMessage('This folder has no photos to rank.');
+      void vscode.window.showInformationMessage(`There are no photos to rank in “${target.title}”.`);
       return;
     }
-    const choices = await this.pickChoices(path.basename(folder.fsPath), photos.length);
+    const choices = await this.pickChoices(target.title, photos.length);
     if (!choices) {
       return;
     }
@@ -106,11 +118,18 @@ export class AutoRanker {
       }
     }
     const keepMine = choices.has('keepMine');
-    const fc = await this.store.cache.folder(folder.fsPath);
-    const stored = new Map(Object.entries(fc.getExtra<Record<string, Stored>>(ANALYSIS_KEY) ?? {}));
+    const folders = [...new Set(photos.map((p) => path.dirname(p.uri.fsPath)))];
+    const caches = new Map(await Promise.all(folders.map(async (f) => [f, await this.store.cache.folder(f)] as const)));
+    // Keyed by path: an album spanning folders can hold two photos of the same name.
+    const stored = new Map<string, Stored>();
+    for (const f of folders) {
+      for (const [name, v] of Object.entries(caches.get(f)!.getExtra<Record<string, Stored>>(ANALYSIS_KEY) ?? {})) {
+        stored.set(path.join(f, name), v);
+      }
+    }
 
     const cancelled = await vscode.window.withProgress(
-      { location: vscode.ProgressLocation.Notification, title: `Auto-ranking ${path.basename(folder.fsPath)}`, cancellable: true },
+      { location: vscode.ProgressLocation.Notification, title: `Auto-ranking ${target.title}`, cancellable: true },
       async (progress, token) => {
         let doneCount = 0;
         let faceRuns = 0;
@@ -144,10 +163,10 @@ export class AutoRanker {
             if (token.isCancellationRequested) return;
             faceRuns++;
             const tf = Date.now();
-            const r = await this.faces(folder, pixels, model!).catch((err) => ({ faces: undefined, error: String(err) }));
+            const r = await this.faces(target, pixels, model!).catch((err) => ({ faces: undefined, error: String(err) }));
             stats.facesMs += Date.now() - tf;
             if (r.faces) {
-              stored.set(p.name, { ...base, faces: r.faces, facesV: FACES_V });
+              stored.set(p.uri.fsPath, { ...base, faces: r.faces, facesV: FACES_V });
               this.log(`Auto-Rank: ${p.name}: ${r.faces.length} face(s) ${JSON.stringify(r.faces)}`);
             } else {
               faceFails++;
@@ -165,7 +184,7 @@ export class AutoRanker {
           if (token.isCancellationRequested) {
             return;
           }
-          const prev = stored.get(p.name);
+          const prev = stored.get(p.uri.fsPath);
           const fresh = prev && prev.size === p.size && prev.mtime === p.mtime;
           const keepFaces = !!fresh && prev.facesV === FACES_V;
           const needFaces = !!model && !keepFaces;
@@ -180,7 +199,7 @@ export class AutoRanker {
             if (a) {
               const { pixels, ...m } = a;
               const base: Stored = { ...m, faces: keepFaces ? prev!.faces : undefined, facesV: keepFaces ? FACES_V : undefined, size: p.size, mtime: p.mtime };
-              stored.set(p.name, base);
+              stored.set(p.uri.fsPath, base);
               if (needFaces && pixels) {
                 faceJobs.push(measureFaces(p, pixels, base));
                 return; // counted when its faces are done
@@ -196,7 +215,7 @@ export class AutoRanker {
           const mb = stats.bytes / 1048576;
           const per = (ms: number) => `${Math.round(ms / stats.photos)} ms/photo`;
           this.log(
-            `Auto-Rank ${path.basename(folder.fsPath)}: measured ${stats.photos} photos in ${wall.toFixed(1)} s ` +
+            `Auto-Rank ${target.title}: measured ${stats.photos} photos in ${wall.toFixed(1)} s ` +
               `(${(stats.photos / wall).toFixed(1)} photos/s, ${threads} threads). ` +
               `Read ${mb.toFixed(0)} MB at ${(mb / wall).toFixed(0)} MB/s overall; ` +
               `per photo: reading ${per(stats.readMs)} (many at once), decoding ${per(stats.decodeMs)} of CPU` +
@@ -216,24 +235,34 @@ export class AutoRanker {
         return token.isCancellationRequested;
       },
     );
-    fc.setExtra(ANALYSIS_KEY, Object.fromEntries(stored));
+    for (const f of folders) {
+      const mine: Record<string, Stored> = {};
+      for (const [file, v] of stored) {
+        if (path.dirname(file) === f) {
+          mine[path.basename(file)] = v;
+        }
+      }
+      caches.get(f)!.setExtra(ANALYSIS_KEY, mine);
+    }
     if (cancelled) {
       return;
     }
 
     // Rejects that stay rejected: yours always, and every reject when Auto-Rank isn't asked to
     // reject (it only adds rejects then, never removes them). Undo restores everything.
-    const cull = await this.edits.cullingIn(folder.fsPath);
-    const keepsReject = (name: string) => {
-      const c = cull.get(name);
+    const cullings = new Map(await Promise.all(folders.map(async (f) => [f, await this.edits.cullingIn(f)] as const)));
+    const cullOf = (file: string) => cullings.get(path.dirname(file))?.get(path.basename(file));
+    const keepsReject = (file: string) => {
+      const c = cullOf(file);
       return c?.flag === 'reject' && (!c.auto || !opts.reject);
     };
     const inputs: RankInput[] = photos
-      .filter((p) => stored.has(p.name))
+      .filter((p) => stored.has(p.uri.fsPath))
       .map((p) => {
-        const s = stored.get(p.name)!;
+        const s = stored.get(p.uri.fsPath)!;
         return {
           name: p.name,
+          id: p.uri.fsPath,
           time: s.time,
           sharpness: s.sharpness,
           blown: s.blown,
@@ -241,7 +270,7 @@ export class AutoRanker {
           layout: s.layout,
           frameFocus: s.frameFocus,
           faces: s.faces,
-          rejected: keepsReject(p.name),
+          rejected: keepsReject(p.uri.fsPath),
         };
       });
     const results = rankAlbum(inputs, opts);
@@ -255,8 +284,8 @@ export class AutoRanker {
       { location: vscode.ProgressLocation.Notification, title: 'Saving ratings' },
       async () => {
         await mapLimit(results, 6, async (r) => {
-          const photo = vscode.Uri.file(path.join(folder.fsPath, r.name));
-          const c = cull.get(r.name);
+          const photo = vscode.Uri.file(r.id);
+          const c = cullOf(r.id);
           const yours = !!c && !c.auto && (c.rating > 0 || !!c.flag);
           if (keepMine && yours) {
             kept++;
@@ -267,15 +296,15 @@ export class AutoRanker {
           await this.edits.write(photo, {
             ...before,
             rating: r.stars,
-            flag: keepsReject(r.name) ? 'reject' : r.flag,
+            flag: keepsReject(r.id) ? 'reject' : r.flag,
             auto: { scores: r.scores, groupAvg: r.groupAvg, group: r.group, notes: r.notes, reason: r.reason, at },
           });
           written++;
         });
       },
     );
-    this.undo.set(folder.fsPath, undo);
-    this.undoOrder.splice(0, this.undoOrder.length, ...this.undoOrder.filter((f) => f !== folder.fsPath), folder.fsPath);
+    this.undo.set(target.key, { title: target.title, items: undo });
+    this.undoOrder.splice(0, this.undoOrder.length, ...this.undoOrder.filter((k) => k !== target.key), target.key);
     void this.updateUndoContext();
 
     const groups = new Set(results.filter((r) => r.group).map((r) => r.group!.id)).size;
@@ -300,34 +329,35 @@ export class AutoRanker {
       (missed ? ` ${missed} could not be read.` : '');
     // A notification instead of a banner in the grid; Undo is also a command (Undo Auto-Rank).
     void vscode.window.showInformationMessage(summary, 'Undo').then((pick) => {
-      if (pick === 'Undo') void this.undoRun(folder);
+      if (pick === 'Undo') void this.undoRun(target.key);
     });
   }
 
   /** Albums whose last Auto-Rank can be undone (this session), most recent first. */
-  undoable(): vscode.Uri[] {
-    return [...this.undoOrder].reverse().map((f) => vscode.Uri.file(f));
+  undoable(): Array<{ key: string; title: string }> {
+    return [...this.undoOrder].reverse().map((key) => ({ key, title: this.undo.get(key)?.title ?? key }));
   }
 
-  canUndo(folder: vscode.Uri): boolean {
-    return this.undo.has(folder.fsPath);
+  canUndo(key: string): boolean {
+    return this.undo.has(key);
   }
 
-  async undoRun(folder: vscode.Uri): Promise<void> {
-    const list = this.undo.get(folder.fsPath);
-    if (!list) {
-      void vscode.window.showInformationMessage(`There is no Auto-Rank of “${path.basename(folder.fsPath)}” to undo.`);
+  async undoRun(key: string): Promise<void> {
+    const run = this.undo.get(key);
+    if (!run) {
+      void vscode.window.showInformationMessage('There is no Auto-Rank of that album to undo.');
       return;
     }
-    this.undo.delete(folder.fsPath);
-    const i = this.undoOrder.indexOf(folder.fsPath);
+    const { title, items: list } = run;
+    this.undo.delete(key);
+    const i = this.undoOrder.indexOf(key);
     if (i >= 0) this.undoOrder.splice(i, 1);
     void this.updateUndoContext();
     await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: 'Restoring the previous ratings' },
       () => mapLimit(list, 6, (u) => this.edits.write(u.photo, u.before)),
     );
-    void vscode.window.showInformationMessage(`Auto-Rank of “${path.basename(folder.fsPath)}” undone: ${list.length} photo${list.length === 1 ? '' : 's'} restored.`);
+    void vscode.window.showInformationMessage(`Auto-Rank of “${title}” undone: ${list.length} photo${list.length === 1 ? '' : 's'} restored.`);
   }
 
   private updateUndoContext(): Thenable<unknown> {
@@ -335,23 +365,31 @@ export class AutoRanker {
   }
 
   /** Make another shot of a similar group its best (pick), instead of the one Auto-Rank chose. */
-  async makeBest(folder: vscode.Uri, name: string): Promise<void> {
-    const cull = await this.edits.cullingIn(folder.fsPath);
-    const chosen = cull.get(name);
+  async makeBest(photo: vscode.Uri, album: ReadonlyArray<vscode.Uri>): Promise<void> {
+    const folders = [...new Set(album.map((u) => path.dirname(u.fsPath)))];
+    const cullings = new Map(await Promise.all(folders.map(async (f) => [f, await this.edits.cullingIn(f)] as const)));
+    const cullOf = (u: vscode.Uri) => cullings.get(path.dirname(u.fsPath))?.get(path.basename(u.fsPath));
+    const chosen = cullOf(photo);
     const g = chosen?.auto?.group;
     if (!chosen || !g) {
       return;
     }
-    const members = [...cull].filter(([, c]) => c.auto?.group?.id === g.id);
-    const oldBest = members.find(([, c]) => c.auto?.group?.best);
-    const bestStars = oldBest ? oldBest[1].rating : chosen.rating;
-    for (const [n, c] of members) {
-      const photo = vscode.Uri.file(path.join(folder.fsPath, n));
-      const sc = (await this.edits.loadSidecar(photo)) ?? emptySidecar();
+    // A group can span folders now, so its members are looked for across the whole album. Group
+    // ids are only unique within a run (g1, g2…), so the run's stamp has to match as well.
+    const run = chosen.auto?.at;
+    const members = album
+      .map((uri) => ({ uri, c: cullOf(uri) }))
+      .filter((m): m is { uri: vscode.Uri; c: NonNullable<ReturnType<typeof cullOf>> } =>
+        !!m.c && m.c.auto?.group?.id === g.id && m.c.auto?.at === run,
+      );
+    const oldBest = members.find((m) => m.c.auto?.group?.best);
+    const bestStars = oldBest ? oldBest.c.rating : chosen.rating;
+    for (const { uri, c } of members) {
+      const sc = (await this.edits.loadSidecar(uri)) ?? emptySidecar();
       if (!sc.auto?.group) {
         continue;
       }
-      const isBest = n === name;
+      const isBest = uri.fsPath === photo.fsPath;
       // The old best was as good as anything here: it stays kept (unflagged, same stars).
       const wasBest = !!c.auto?.group?.best && !isBest;
       const { kept: _k, ...rest } = sc.auto.group;
@@ -364,9 +402,10 @@ export class AutoRanker {
         sc.flag = undefined;
         if (!wasBest) sc.rating = Math.max(1, Math.min(c.rating, bestStars - 1));
       }
-      await this.edits.write(photo, sc);
+      await this.edits.write(uri, sc);
     }
   }
+
 
   /** Bytes good enough to measure: the camera's built-in preview, else the whole file. */
   private async analyze(p: Photo, facePx: number, stats: RunStats): Promise<(Analysis & { time?: number; pixels?: Rgba }) | undefined> {

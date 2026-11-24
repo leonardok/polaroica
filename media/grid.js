@@ -280,9 +280,7 @@
       ...[
       h('span', { class: 'menu-anchor' }, menuBtn, menuOpen ? menuEl : null),
       h('span', { class: 'sep', 'aria-hidden': 'true' }),
-      album === 'folder'
-        ? iconBtn('spark', 'Auto-Rank this album (focus, exposure, similar shots)…', () => post({ type: 'autoRank' }))
-        : null,
+      iconBtn('spark', 'Auto-Rank this album (focus, exposure, similar shots)…', () => post({ type: 'autoRank' })),
       album === 'folder'
         ? iconBtn('export', 'Export to JPEG (the selection, picks, by stars…) with your adjustments…', () => post({ type: 'export' }))
         : null,
@@ -660,7 +658,15 @@
 
   function autoRankSection(name, auto) {
     const g = auto.group;
-    const members = g && g.size > 1 ? photos.filter((p) => p.cull && p.cull.auto && p.cull.auto.group && p.cull.auto.group.id === g.id) : [];
+    // Group ids are only unique within a run (g1, g2…), and a tag album spans folders, so the
+    // run's stamp has to match too or shots from different shoots would be shown as one group.
+    const members =
+      g && g.size > 1
+        ? photos.filter(
+            (p) =>
+              p.cull && p.cull.auto && p.cull.auto.group && p.cull.auto.group.id === g.id && p.cull.auto.at === auto.at,
+          )
+        : [];
     const summary = h('span', { class: 'section-summary' }, SPARK(), g && g.size > 1 ? (g.best ? ` best of ${g.size}` : g.kept ? ` kept · 1 of ${g.size} similar` : ` 1 of ${g.size} similar`) : ' ranked');
     return section(
       'autorank',
