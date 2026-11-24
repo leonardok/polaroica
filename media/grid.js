@@ -45,19 +45,27 @@
     tile.classList.toggle('is-placeholder', t.kind === 'placeholder');
   }
 
+  /** Lets go of a thumbnail url once nothing can still be loading it (see receiveThumbs). */
+  function releaseLater(url) {
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   function receiveThumbs(items) {
     for (const it of items) {
       const prev = thumbs.get(it.name);
       if (prev && prev.kind === 'thumb' && it.kind === 'placeholder') {
         continue;
       }
-      if (prev) {
-        URL.revokeObjectURL(prev.url);
-      }
       thumbs.set(it.name, { url: blobUrl(it.data, it.mime), kind: it.kind });
       const tile = tileByName.get(it.name);
       if (tile) {
         applyThumb(tile, it.name);
+      }
+      // The quick thumbnail it replaces may still be decoding in the tile's <img>: revoking its
+      // url now aborts that load, and the page reports it as a failure. Let it go a moment after
+      // the replacement is in place.
+      if (prev) {
+        releaseLater(prev.url);
       }
     }
   }
@@ -403,7 +411,7 @@
     const names = new Set(photos.map((p) => p.name));
     for (const [name, t] of thumbs) {
       if (!names.has(name)) {
-        URL.revokeObjectURL(t.url);
+        releaseLater(t.url);
         thumbs.delete(name);
       }
     }
