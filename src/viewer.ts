@@ -97,6 +97,11 @@ export class PhotoViewers implements vscode.Disposable {
     );
   }
 
+  /** The photo shown in the photo tab that is in front, if any. */
+  activePhoto(): vscode.Uri | undefined {
+    return [...this.viewers].find((x) => x.panel.active)?.current?.uri;
+  }
+
   /** Right-click menu on the photo in the active photo tab. */
   async contextAction(action: 'move' | 'reveal' | 'export' | 'copyPath'): Promise<void> {
     const v = [...this.viewers].find((x) => x.panel.active);
