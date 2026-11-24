@@ -343,6 +343,15 @@ export function activate(context: vscode.ExtensionContext): void {
         grids.openSource(new TagSource(tags[0], tagIndex, libraries));
       }
     }),
+    vscode.commands.registerCommand('polaroica.photoDelete', async (ctx?: { webview?: string; photo?: string }) => {
+      const photos =
+        ctx?.webview === 'polaroica.grid'
+          ? grids.selectionFor(ctx.photo)
+          : ctx?.webview === 'polaroica.photo'
+            ? [viewers.activePhoto()].filter((u): u is vscode.Uri => !!u)
+            : [];
+      await deleter.deletePhotos(photos);
+    }),
     vscode.commands.registerCommand('polaroica.photoTag', async (ctx?: { webview?: string; photo?: string }) => {
       if (ctx?.webview !== 'polaroica.grid') {
         return;

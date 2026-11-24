@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { formatBytes } from './core/images';
-import { DeleteItem, planRejectDelete } from './core/trash';
+import { DeleteItem, DeletePlan, planPhotoDelete, planRejectDelete, runDeletes } from './core/trash';
 import { SIDECAR_DIR } from './core/xmp';
 import { EditStore } from './edits';
 import { Libraries } from './libraries';
@@ -26,6 +26,39 @@ export class Deleter {
       return;
     }
     const what = n === 1 ? plan.items[0].name : `${n} rejected photos`;
+    await this.confirmAndDelete(plan, where, what, [folder]);
+  }
+
+  /** Right-click → Delete on a selection of photos, which may span folders. */
+  async deletePhotos(uris: ReadonlyArray<vscode.Uri>): Promise<void> {
+    if (!uris.length) {
+      return;
+    }
+    const files = await Promise.all(
+      uris.map(async (u) => ({
+        path: u.fsPath,
+        size: await fs.promises
+          .stat(u.fsPath)
+          .then((st) => st.size)
+          .catch(() => 0),
+      })),
+    );
+    const plan = planPhotoDelete(files);
+    const folders = [...new Set(files.map((f) => path.dirname(f.path)))].map((f) => vscode.Uri.file(f));
+    const where = folders.length === 1 ? this.libraries.crumbs(folders[0]).join(' / ') : `${folders.length} folders`;
+    const n = plan.items.length;
+    const what = n === 1 ? plan.items[0].name : `${n} photos`;
+    await this.confirmAndDelete(plan, where, what, folders);
+  }
+
+  /** Asks first, then deletes: to the Trash where there is one, else permanently. */
+  private async confirmAndDelete(
+    plan: DeletePlan,
+    where: string,
+    what: string,
+    folders: ReadonlyArray<vscode.Uri>,
+  ): Promise<void> {
+    const n = plan.items.length;
     const sample = plan.items.slice(0, 5).map((i) => i.name).join(', ') + (n > 5 ? `, and ${n - 5} more` : '');
     const go = await vscode.window.showWarningMessage(
       `Delete ${what} from ${where}?`,
@@ -39,53 +72,36 @@ export class Deleter {
       return;
     }
 
-    let useTrash = true;
-    let trashed = 0;
-    let removed = 0;
-    const failed: string[] = [];
+    let out = { trashed: 0, removed: 0, failed: [] as string[] };
     await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: `Deleting ${what}`, cancellable: true },
       async (progress, token) => {
-        for (let i = 0; i < n; i++) {
-          if (token.isCancellationRequested) {
-            break;
-          }
-          const item = plan.items[i];
-          progress.report({ message: `${i + 1} of ${n} · ${item.name}`, increment: 100 / n });
-          try {
-            await deleteOne(item, useTrash);
-            if (useTrash) trashed++;
-            else removed++;
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            const gone = err instanceof vscode.FileSystemError && err.code === 'FileNotFound';
-            if (useTrash && !gone) {
-              // Network shares usually have no Trash: offer to delete the rest for good.
-              const left = n - i;
-              const permanent = await vscode.window.showWarningMessage(
-                `Can't move ${item.name} to the Trash: ${msg}`,
-                {
-                  modal: true,
-                  detail: `${where} may not have a Trash (network shares usually don't). Delete the remaining ${left === 1 ? 'photo' : `${left} photos`} permanently? This can't be undone.`,
-                },
-                'Delete Permanently',
-              );
-              if (permanent !== 'Delete Permanently') {
-                break;
-              }
-              useTrash = false;
-              i--; // retry this one
-              continue;
-            }
-            failed.push(`${item.name}: ${msg}`);
-          }
-        }
+        out = await runDeletes(plan.items, {
+          delete: (item, useTrash) => deleteOne(item, useTrash),
+          isGone: (err) => err instanceof vscode.FileSystemError && err.code === 'FileNotFound',
+          progress: (done, item) => progress.report({ message: `${done} of ${n} · ${item.name}`, increment: 100 / n }),
+          cancelled: () => token.isCancellationRequested,
+          askPermanent: async (item, message, left) => {
+            const permanent = await vscode.window.showWarningMessage(
+              `Can't move ${item.name} to the Trash: ${message}`,
+              {
+                modal: true,
+                detail: `${where} may not have a Trash (network shares usually don't). Delete the remaining ${left === 1 ? 'photo' : `${left} photos`} permanently? This can't be undone.`,
+              },
+              'Delete Permanently',
+            );
+            return permanent === 'Delete Permanently';
+          },
+        });
       },
     );
+    const { trashed, removed, failed } = out;
 
-    await fs.promises.rmdir(path.join(folder.fsPath, SIDECAR_DIR)).catch(() => undefined); // only when empty
-    this.edits.forget(folder.fsPath);
-    this.store.invalidate(folder);
+    for (const folder of folders) {
+      await fs.promises.rmdir(path.join(folder.fsPath, SIDECAR_DIR)).catch(() => undefined); // only when empty
+      this.edits.forget(folder.fsPath);
+      this.store.invalidate(folder);
+    }
 
     const parts: string[] = [];
     if (trashed) parts.push(`moved ${trashed === 1 ? '1 photo' : `${trashed} photos`} to the Trash`);
