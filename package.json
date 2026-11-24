@@ -212,6 +212,12 @@
         "title": "Remove Tags…",
         "category": "Polaroica",
         "icon": "$(tag)"
+      },
+      {
+        "command": "polaroica.photoDelete",
+        "title": "Delete…",
+        "category": "Polaroica",
+        "icon": "$(trash)"
       }
     ],
     "menus": {
@@ -342,6 +348,10 @@
         {
           "command": "polaroica.photoUntag",
           "when": "false"
+        },
+        {
+          "command": "polaroica.photoDelete",
+          "when": "false"
         }
       ],
       "webview/context": [
@@ -374,6 +384,11 @@
           "command": "polaroica.photoUntag",
           "when": "webviewId == 'polaroica.grid' && webviewSection == 'photo'",
           "group": "1_photo@6"
+        },
+        {
+          "command": "polaroica.photoDelete",
+          "when": "(webviewId == 'polaroica.grid' || webviewId == 'polaroica.photo') && webviewSection == 'photo'",
+          "group": "9_delete@1"
         }
       ],
       "polaroica.copy": [
