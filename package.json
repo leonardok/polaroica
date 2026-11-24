@@ -218,6 +218,12 @@
         "title": "Delete…",
         "category": "Polaroica",
         "icon": "$(trash)"
+      },
+      {
+        "command": "polaroica.gridDeleteRejected",
+        "title": "Delete Rejected Photos…",
+        "category": "Polaroica",
+        "icon": "$(trash)"
       }
     ],
     "menus": {
@@ -352,6 +358,10 @@
         {
           "command": "polaroica.photoDelete",
           "when": "false"
+        },
+        {
+          "command": "polaroica.gridDeleteRejected",
+          "when": "false"
         }
       ],
       "webview/context": [
@@ -389,6 +399,11 @@
           "command": "polaroica.photoDelete",
           "when": "(webviewId == 'polaroica.grid' || webviewId == 'polaroica.photo') && webviewSection == 'photo'",
           "group": "9_delete@1"
+        },
+        {
+          "command": "polaroica.gridDeleteRejected",
+          "when": "webviewId == 'polaroica.grid'",
+          "group": "9_delete@2"
         }
       ],
       "polaroica.copy": [

@@ -46,6 +46,35 @@ export function planPhotoDelete(files: ReadonlyArray<{ path: string; size: numbe
   return { items, bytes: items.reduce((a, i) => a + i.size, 0) };
 }
 
+/**
+ * The rejects among a set of photos that may span folders, which is what a tag album is. Each
+ * folder's own sidecars say what is rejected there; a reject in one of those folders that is not
+ * in the set is not part of the album, and is left alone.
+ */
+export function planRejectDeleteAmong(
+  photos: ReadonlyArray<{ path: string; size: number }>,
+  cullingOf: (folder: string) => ReadonlyMap<string, { flag?: string }>,
+): DeletePlan {
+  const byFolder = new Map<string, Array<{ name: string; size: number }>>();
+  for (const p of photos) {
+    const folder = path.dirname(p.path);
+    const here = byFolder.get(folder);
+    const entry = { name: path.basename(p.path), size: p.size };
+    if (here) {
+      here.push(entry);
+    } else {
+      byFolder.set(folder, [entry]);
+    }
+  }
+  return mergePlans([...byFolder].map(([folder, names]) => planRejectDelete(folder, names, cullingOf(folder))));
+}
+
+/** One plan out of several folders' plans: a tag album's rejects live wherever their photos do. */
+export function mergePlans(plans: ReadonlyArray<DeletePlan>): DeletePlan {
+  const items = plans.flatMap((p) => p.items);
+  return { items, bytes: items.reduce((a, i) => a + i.size, 0) };
+}
+
 export interface DeleteOutcome {
   trashed: number;
   removed: number;

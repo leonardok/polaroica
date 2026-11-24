@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { formatBytes } from './core/images';
-import { DeleteItem, DeletePlan, planPhotoDelete, planRejectDelete, runDeletes } from './core/trash';
+import { DeleteItem, DeletePlan, planPhotoDelete, planRejectDelete, planRejectDeleteAmong, runDeletes } from './core/trash';
 import { SIDECAR_DIR } from './core/xmp';
 import { EditStore } from './edits';
 import { Libraries } from './libraries';
@@ -27,6 +27,38 @@ export class Deleter {
     }
     const what = n === 1 ? plan.items[0].name : `${n} rejected photos`;
     await this.confirmAndDelete(plan, where, what, [folder]);
+  }
+
+  /**
+   * The rejects among a given set of photos, for a tag album: it has no single folder, so the
+   * album's own photos say which folders to look in, and each folder's sidecars say what is
+   * rejected. A reject elsewhere in those folders is not in the album and is left alone.
+   */
+  async deleteRejectedAmong(photos: ReadonlyArray<vscode.Uri>, where: string): Promise<void> {
+    const folders = [...new Set(photos.map((u) => path.dirname(u.fsPath)))];
+    const [sized, cullings] = await Promise.all([
+      Promise.all(
+        photos.map(async (u) => ({
+          path: u.fsPath,
+          size: await fs.promises
+            .stat(u.fsPath)
+            .then((st) => st.size)
+            .catch(() => undefined),
+        })),
+      ),
+      Promise.all(folders.map(async (f) => [f, await this.edits.cullingIn(f)] as const)),
+    ]);
+    // A photo that is no longer there is not ours to delete.
+    const present = sized.filter((p): p is { path: string; size: number } => p.size !== undefined);
+    const culling = new Map(cullings);
+    const plan = planRejectDeleteAmong(present, (f) => culling.get(f) ?? new Map());
+    if (!plan.items.length) {
+      void vscode.window.showInformationMessage(`No rejected photos in ${where}.`);
+      return;
+    }
+    const n = plan.items.length;
+    const what = n === 1 ? plan.items[0].name : `${n} rejected photos`;
+    await this.confirmAndDelete(plan, where, what, folders.map((f) => vscode.Uri.file(f)));
   }
 
   /** Right-click → Delete on a selection of photos, which may span folders. */

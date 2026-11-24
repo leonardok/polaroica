@@ -91,6 +91,7 @@ export function activate(context: vscode.ExtensionContext): void {
     undoAutoRank: (folder) => void ranker.undoRun(folder),
     makeBest: (folder, name) => void ranker.makeBest(folder, name),
     deleteRejected: (folder) => void deleter.deleteRejected(folder),
+    deleteRejectedAmong: (photos, where) => void deleter.deleteRejectedAmong(photos, where),
     exportPhotos: (folder, selected) => void exporter.exportFrom(folder, selected),
   });
   const background = new BackgroundThumbnails(libraries, store, thumbs, () => capMb() * 1024 * 1024, (photo, t) =>
@@ -225,6 +226,16 @@ export function activate(context: vscode.ExtensionContext): void {
         await ranker.run(uri);
       } else {
         void vscode.window.showInformationMessage('Right-click an album in the Polaroica sidebar, or use the Auto-Rank button in a grid.');
+      }
+    }),
+    vscode.commands.registerCommand('polaroica.gridDeleteRejected', async (ctx?: { webview?: string }) => {
+      // Its own command, not polaroica.deleteRejected: that one falls back to the sidebar
+      // selection, which in a grid would be some other album.
+      if (ctx?.webview !== 'polaroica.grid') {
+        return;
+      }
+      if (!grids.deleteRejectedInActive()) {
+        void vscode.window.showInformationMessage('Open an album grid to delete its rejected photos.');
       }
     }),
     vscode.commands.registerCommand('polaroica.deleteRejected', async (arg?: unknown) => {

@@ -286,7 +286,7 @@
       album === 'folder'
         ? iconBtn('export', 'Export to JPEG (the selection, picks, by stars…) with your adjustments…', () => post({ type: 'export' }))
         : null,
-      album === 'folder' && n.rejects
+      n.rejects
         ? iconBtn('trash', `Delete ${n.rejects} rejected photo${n.rejects === 1 ? '' : 's'} from disk… (asks first)`, () => post({ type: 'deleteRejected' }), n.rejects)
         : null,
       iconBtn('refresh', 'Refresh', () => post({ type: 'refresh' })),

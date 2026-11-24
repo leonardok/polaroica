@@ -42,6 +42,8 @@ export interface GridHost {
   undoAutoRank?(folder: vscode.Uri): void;
   makeBest?(folder: vscode.Uri, name: string): void;
   deleteRejected?(folder: vscode.Uri): void;
+  /** A tag album spans folders: its rejects are picked out of the album's own photos. */
+  deleteRejectedAmong?(photos: vscode.Uri[], where: string): void;
   exportPhotos?(folder: vscode.Uri, selected: string[]): void;
 }
 
@@ -94,6 +96,13 @@ export class GridPanels implements vscode.Disposable {
         }
       }),
     );
+  }
+
+  /** Delete Rejects from the grid's context menu: the grid in front, never the sidebar selection. */
+  deleteRejectedInActive(): boolean {
+    const active = [...this.panels.values()].find((p) => p.panel.active);
+    active?.deleteRejected();
+    return !!active;
   }
 
   setHost(host: GridHost): void {
@@ -332,6 +341,17 @@ class GridPanel {
   }
 
   /** True when a change to `folder` could change what this grid shows. */
+  /** Delete Rejects for this grid: its folder's rejects, or a tag album's own rejected photos. */
+  deleteRejected(): void {
+    const { host } = this.owner.ctx;
+    const own = this.source.folder;
+    if (own) {
+      host?.deleteRejected?.(own);
+    } else {
+      host?.deleteRejectedAmong?.(this.photos.map((p) => p.photo.uri), this.source.title);
+    }
+  }
+
   covers(folder: vscode.Uri): boolean {
     if (this.source.folder) {
       return this.source.folder.fsPath === folder.fsPath;
@@ -558,7 +578,7 @@ class GridPanel {
         if (own) host?.undoAutoRank?.(own);
         break;
       case 'deleteRejected':
-        if (own) host?.deleteRejected?.(own);
+        this.deleteRejected();
         break;
       case 'export':
         if (own) host?.exportPhotos?.(own, this.selected);
